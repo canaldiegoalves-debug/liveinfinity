@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Live Infinity",
+  "version": "1.0.0",
+  "description": "Automação inteligente para lives de vendas.",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "notifications",
+    "scripting",
+    "sidePanel",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://shop.tiktok.com/*",
+    "https://api.telegram.org/*",
+    "http://localhost:8787/*",
+    "http://127.0.0.1:8787/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://shop.tiktok.com/*"
+      ],
+      "js": [
+        "src/shared/constants.js",
+        "src/content/detector.js",
+        "src/content/controller.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "action": {
+    "default_title": "Abrir Live Infinity"
+  },
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  }
+}
