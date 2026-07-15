@@ -9,6 +9,29 @@ const state={
   commentTimer:null,endAt:null,endTimer:null,audio:null,audioFiles:[],videoFiles:[],audioIndex:0,ambientContext:null,ambientNodes:[],ambientTimers:[],protectionEvents:[],pendingRender:false,licenseError:"",userEditing:false,editingReleaseTimer:null
 };
 
+
+async function apiFetch(url, options = {}, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (error) {
+    const networkError = new Error(
+      error?.name === "AbortError"
+        ? "O servidor demorou para responder."
+        : "Sem conexão com o servidor da Live Infinity."
+    );
+    networkError.transient = true;
+    throw networkError;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function ensureDeviceId(){
   const data=await chrome.storage.local.get([
     ORION.STORAGE.DEVICE_ID
@@ -34,7 +57,7 @@ async function validateOnlineLicense(license){
 
   const deviceId=await ensureDeviceId();
 
-  const response=await fetch(
+  const response=await apiFetch(
     `${ORION.API_BASE_URL}/api/validate`,
     {
       method:"POST",
@@ -92,12 +115,15 @@ async function load(){
 
       state.licenseError="";
     }catch(error){
-      state.license=null;
       state.licenseError=error.message;
 
-      await chrome.storage.local.remove([
-        ORION.STORAGE.LICENSE
-      ]);
+      if(!error?.transient){
+        state.license=null;
+
+        await chrome.storage.local.remove([
+          ORION.STORAGE.LICENSE
+        ]);
+      }
     }
   }
 }
@@ -120,7 +146,7 @@ async function post(type,payload={}){
 async function activate(email,key){
   const deviceId=await ensureDeviceId();
 
-  const response=await fetch(
+  const response=await apiFetch(
     `${ORION.API_BASE_URL}/api/activate`,
     {
       method:"POST",
@@ -685,14 +711,19 @@ async function periodicLicenseValidation(){
       renderWhenSafe();
     }
   }catch(error){
-    state.license=null;
     state.licenseError=error.message;
+
+    if(error?.transient){
+      return;
+    }
+
+    state.license=null;
 
     await chrome.storage.local.remove([
       ORION.STORAGE.LICENSE
     ]);
 
-    render();
+    renderWhenSafe();
   }
 }
 

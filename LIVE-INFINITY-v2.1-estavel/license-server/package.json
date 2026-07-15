@@ -1,0 +1,19 @@
+{
+  "name": "live-infinity-license-server",
+  "version": "2.1.0",
+  "private": true,
+  "description": "API e painel administrativo Live Infinity com MySQL",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "db:init": "node scripts/init-db.js",
+    "db:migrate-json": "node scripts/migrate-json.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "mysql2": "^3.11.5"
+  }
+}
