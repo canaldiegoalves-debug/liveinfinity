@@ -25,8 +25,36 @@ const state = {
   tickets: [],
   page: "dashboard",
   loading: false,
-  refreshTimer: null
+  refreshTimer: null,
+  userEditing: false,
+  pendingRender: false,
+  editingReleaseTimer: null
 };
+
+
+function isEditableAdminElement(element) {
+  return Boolean(
+    element &&
+    (
+      element.matches?.("input, textarea, select") ||
+      element.isContentEditable
+    )
+  );
+}
+
+function isEditingAdmin() {
+  return state.userEditing || isEditableAdminElement(document.activeElement);
+}
+
+function renderPageWhenSafe() {
+  if (isEditingAdmin()) {
+    state.pendingRender = true;
+    return;
+  }
+
+  state.pendingRender = false;
+  renderPage();
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -99,7 +127,7 @@ async function loadData({ silent = false } = {}) {
     elements.lastUpdate.textContent =
       `Atualizado às ${new Date().toLocaleTimeString("pt-BR")}`;
 
-    renderPage();
+    renderPageWhenSafe();
   } catch (error) {
     if (!silent) alert(error.message);
   } finally {
@@ -521,6 +549,33 @@ function renderPage() {
 
   (pages[state.page] || dashboardPage)();
 }
+
+
+document.addEventListener("focusin", event => {
+  if (isEditableAdminElement(event.target)) {
+    clearTimeout(state.editingReleaseTimer);
+    state.userEditing = true;
+  }
+}, true);
+
+document.addEventListener("input", event => {
+  if (isEditableAdminElement(event.target)) {
+    clearTimeout(state.editingReleaseTimer);
+    state.userEditing = true;
+  }
+}, true);
+
+document.addEventListener("focusout", () => {
+  clearTimeout(state.editingReleaseTimer);
+
+  state.editingReleaseTimer = setTimeout(() => {
+    state.userEditing = isEditableAdminElement(document.activeElement);
+
+    if (state.pendingRender && !state.userEditing) {
+      renderPageWhenSafe();
+    }
+  }, 450);
+}, true);
 
 elements.nav.addEventListener("click", event => {
   const button = event.target.closest("[data-page]");

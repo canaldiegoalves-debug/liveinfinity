@@ -1,0 +1,15 @@
+LIVE INFINITY v2.0.1
+
+Esta atualização mantém a mesma pasta oficial:
+LIVE-INFINITY-v2-mysql
+
+CORREÇÕES
+- O painel Admin não apaga mais e-mail, senha, valores ou outros campos durante a digitação.
+- A atualização automática continua funcionando sem reconstruir formulários em edição.
+- A extensão mantém o cursor e os valores digitados durante sincronizações.
+- Falhas temporárias de internet não removem a licença salva.
+- Requisições da licença possuem timeout e mensagens de erro mais claras.
+
+VERSÕES
+- Backend/Admin: 2.0.1
+- Extensão: 1.1.3
