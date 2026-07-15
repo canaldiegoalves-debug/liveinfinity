@@ -6,30 +6,8 @@ const state={
   settings:{...ORION.DEFAULTS},
   collapse:{},
   live:{dashboardDetected:false,live:false,elapsedSeconds:0,viewers:null,sales:0,gmv:null,product:null,saleEvents:[],chatMessages:[],violation:null,protectionStatus:"idle",lastScanAt:null},
-  commentTimer:null,endAt:null,endTimer:null,audio:null,audioFiles:[],videoFiles:[],audioIndex:0,ambientContext:null,ambientNodes:[],ambientTimers:[],protectionEvents:[],pendingRender:false,licenseError:"",userEditing:false,editingReleaseTimer:null
+  commentTimer:null,endAt:null,endTimer:null,audio:null,audioFiles:[],videoFiles:[],audioIndex:0,ambientContext:null,ambientNodes:[],ambientTimers:[],protectionEvents:[],pendingRender:false,licenseError:""
 };
-
-async function apiFetch(url, options = {}, timeoutMs = 10000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-  } catch (error) {
-    const networkError = new Error(
-      error?.name === "AbortError"
-        ? "O servidor demorou para responder."
-        : "Sem conexão com o servidor da Live Infinity."
-    );
-    networkError.transient = true;
-    throw networkError;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 async function ensureDeviceId(){
   const data=await chrome.storage.local.get([
@@ -56,7 +34,7 @@ async function validateOnlineLicense(license){
 
   const deviceId=await ensureDeviceId();
 
-  const response=await apiFetch(
+  const response=await fetch(
     `${ORION.API_BASE_URL}/api/validate`,
     {
       method:"POST",
@@ -105,6 +83,9 @@ async function load(){
     ...ORION.DEFAULTS,
     ...(data[ORION.STORAGE.SETTINGS]||{})
   };
+  state.endAt=Number(state.settings.endTimerAt||0)||null;
+  if(state.endAt&&state.endAt>Date.now())startTicker();
+  if(state.endAt&&state.endAt<=Date.now())state.endAt=null;
   state.collapse=data[ORION.STORAGE.COLLAPSE]||{};
 
   if(state.license){
@@ -114,15 +95,12 @@ async function load(){
 
       state.licenseError="";
     }catch(error){
+      state.license=null;
       state.licenseError=error.message;
 
-      if(!error?.transient){
-        state.license=null;
-
-        await chrome.storage.local.remove([
-          ORION.STORAGE.LICENSE
-        ]);
-      }
+      await chrome.storage.local.remove([
+        ORION.STORAGE.LICENSE
+      ]);
     }
   }
 }
@@ -145,7 +123,7 @@ async function post(type,payload={}){
 async function activate(email,key){
   const deviceId=await ensureDeviceId();
 
-  const response=await apiFetch(
+  const response=await fetch(
     `${ORION.API_BASE_URL}/api/activate`,
     {
       method:"POST",
@@ -203,30 +181,25 @@ function section(id,icon,title,sub,body,open=true){
     </button><div class="section-body">${body}</div></section>`;
 }
 
-function isEditableElement(element){
-  return Boolean(
-    element &&
-    app.contains(element) &&
-    (
-      element.matches?.("input, textarea, select") ||
-      element.isContentEditable
-    )
-  );
-}
-
 function isEditingPanel(){
-  return state.userEditing || isEditableElement(document.activeElement);
+  const active=document.activeElement;
+
+  if(!active||!app.contains(active))return false;
+
+  return (
+    active.matches("input, textarea, select") ||
+    active.isContentEditable
+  );
 }
 
 function renderWhenSafe(){
   if(isEditingPanel()){
     state.pendingRender=true;
-    return false;
+    return;
   }
 
   state.pendingRender=false;
   render();
-  return true;
 }
 
 function updateLiveFields(){
@@ -347,7 +320,7 @@ function home(){
       <button data-time="60">1h</button><button data-time="120">2h</button><button data-time="240" class="active">4h</button><button data-time="360">6h</button><button data-time="480">8h</button>
     </div>
     <label>Ou digite manualmente</label><input id="timer-minutes" type="number" value="${state.settings.endTimerMinutes}">
-    <div class="actions"><button id="timer-start" class="${state.endAt?"btn-danger":"btn-primary"}">${state.endAt?"■ Encerrar ciclo":"▶ Iniciar ciclo"}</button></div>
+    <div class="actions"><button id="timer-start" class="${state.endAt?"btn-danger":"btn-primary"}">${state.endAt?"■ Cancelar timer":"▶ Iniciar ciclo"}</button></div><p id="timer-status" class="helper">${state.endAt?"Timer ativo. A LIVE será encerrada automaticamente.":"Timer parado."}</p>
   `)}
 
   ${section("product","📌","Fixação de Produto","controle rápido do produto atual",`
@@ -487,16 +460,19 @@ function bind(){
   document.getElementById("timer-start")?.addEventListener("click",async()=>{
     if(state.endAt){
       state.endAt=null;
+      state.settings.endTimerAt=null;
       clearInterval(state.endTimer);
       state.endTimer=null;
+      await saveSettings();
       render();
       return;
     }
 
     const m=Math.max(1,+document.getElementById("timer-minutes").value||1);
     state.settings.endTimerMinutes=m;
-    await saveSettings();
     state.endAt=Date.now()+m*60000;
+    state.settings.endTimerAt=state.endAt;
+    await saveSettings();
     startTicker();
     render();
   });
@@ -612,7 +588,7 @@ function bind(){
   });
 }
 function scheduleComment(){clearTimeout(state.commentTimer);if(!state.settings.commentsEnabled||!state.settings.comments.length)return;const min=Math.max(5,state.settings.minCommentDelay),max=Math.max(min,state.settings.maxCommentDelay),delay=(Math.floor(Math.random()*(max-min+1))+min)*1000;state.commentTimer=setTimeout(()=>{post("ORION_SEND_CHAT",{text:state.settings.comments[Math.floor(Math.random()*state.settings.comments.length)]});scheduleComment()},delay)}
-function startTicker(){clearInterval(state.endTimer);state.endTimer=setInterval(()=>{if(!state.endAt)return;const r=Math.max(0,Math.ceil((state.endAt-Date.now())/1000)),el=document.getElementById("remaining");if(el)el.textContent=fmt(r);if(r===0){clearInterval(state.endTimer);state.endTimer=null;chrome.runtime.sendMessage({type:"ORION_NOTIFY",payload:{title:"Timer concluído",message:"O tempo programado terminou."}})}},1000)}
+function startTicker(){clearInterval(state.endTimer);state.endTimer=setInterval(()=>{if(!state.endAt)return;const r=Math.max(0,Math.ceil((state.endAt-Date.now())/1000)),el=document.getElementById("remaining");if(el)el.textContent=fmt(r);if(r===0){clearInterval(state.endTimer);state.endTimer=null;state.endAt=null;const msg=document.getElementById("timer-status");if(msg)msg.textContent="Tempo concluído. Encerramento automático solicitado."}},1000)}
 chrome.runtime.onMessage.addListener((message)=>{
   if(message?.type==="ORION_AUTOMATION_EVENT"){
     const payload=message.payload||{};
@@ -668,29 +644,12 @@ chrome.runtime.onMessage.addListener((message)=>{
   }
 });
 
-app.addEventListener("focusin",event=>{
-  if(isEditableElement(event.target)){
-    clearTimeout(state.editingReleaseTimer);
-    state.userEditing=true;
-  }
-});
-
-app.addEventListener("input",event=>{
-  if(isEditableElement(event.target)){
-    clearTimeout(state.editingReleaseTimer);
-    state.userEditing=true;
-  }
-},true);
-
 app.addEventListener("focusout",()=>{
-  clearTimeout(state.editingReleaseTimer);
-  state.editingReleaseTimer=setTimeout(()=>{
-    state.userEditing=isEditableElement(document.activeElement);
-
-    if(state.pendingRender&&!state.userEditing){
+  setTimeout(()=>{
+    if(state.pendingRender&&!isEditingPanel()){
       renderWhenSafe();
     }
-  },350);
+  },120);
 });
 
 async function periodicLicenseValidation(){
@@ -710,19 +669,14 @@ async function periodicLicenseValidation(){
       renderWhenSafe();
     }
   }catch(error){
-    state.licenseError=error.message;
-
-    if(error?.transient){
-      return;
-    }
-
     state.license=null;
+    state.licenseError=error.message;
 
     await chrome.storage.local.remove([
       ORION.STORAGE.LICENSE
     ]);
 
-    renderWhenSafe();
+    render();
   }
 }
 

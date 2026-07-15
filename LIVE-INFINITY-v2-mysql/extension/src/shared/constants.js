@@ -37,6 +37,7 @@ window.ORION = {
     protectionTelegram: true,
     protectionNotify: true,
     protectionCooldownSeconds: 120,
-    endTimerMinutes: 240
+    endTimerMinutes: 240,
+    endTimerAt: null
   }
 };

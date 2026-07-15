@@ -110,19 +110,116 @@ window.OrionDetector = {
   },
 
   collectSales() {
-    const pattern = /cliente comprou|acabou de comprar|comprou o produto|nova venda/i;
+    const salePattern =
+      /cliente comprou|acabou de comprar|comprou o produto|nova venda|pedido realizado|finalizou a compra/i;
 
-    const list = [...document.querySelectorAll("body *")]
-      .map((element) => this.normalize(element.innerText))
-      .filter((text) => text && text.length < 220 && pattern.test(text));
+    const genericPattern =
+      /^(cliente|cliente\s*\d+|comprador|usuário|usuario|user)\b/i;
 
-    return [...new Set(list)]
-      .slice(-50)
-      .map((text) => ({
-        id: `${text}-${text.length}`,
+    const cleanName = (value) => {
+      const text = this.normalize(value)
+        .replace(
+          /\b(cliente comprou|acabou de comprar|comprou o produto|nova venda|pedido realizado|finalizou a compra)\b.*$/i,
+          ""
+        )
+        .replace(/[•·|:–—-]+$/g, "")
+        .trim();
+
+      if (!text || genericPattern.test(text)) return "";
+      if (text.length > 80) return "";
+      return text;
+    };
+
+    const findBuyerName = (element, saleText) => {
+      const root =
+        element.closest(
+          '[class*="order"],[class*="sale"],[class*="purchase"],[class*="notification"],[class*="message"],[class*="item"],li'
+        ) || element.parentElement || element;
+
+      const selectors = [
+        '[class*="buyer"]',
+        '[class*="customer"]',
+        '[class*="username"]',
+        '[class*="user-name"]',
+        '[class*="nickname"]',
+        '[class*="name"]',
+        '[data-e2e*="name"]',
+        '[data-testid*="name"]',
+        'strong',
+        'b'
+      ];
+
+      for (const selector of selectors) {
+        for (const node of root.querySelectorAll(selector)) {
+          const candidate = cleanName(node.innerText || node.textContent || "");
+          if (candidate) return candidate;
+        }
+      }
+
+      const directPatterns = [
+        /^(.+?)\s+(?:acabou de comprar|comprou o produto|finalizou a compra|realizou um pedido)/i,
+        /(?:nova venda|pedido realizado)[:\s-]+(.+?)(?:\s+comprou|\s*$)/i,
+        /^(.+?)\s+comprou\b/i
+      ];
+
+      for (const pattern of directPatterns) {
+        const match = saleText.match(pattern);
+        const candidate = cleanName(match?.[1] || "");
+        if (candidate) return candidate;
+      }
+
+      const lines = this.normalize(root.innerText || "")
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      const saleIndex = lines.findIndex((line) => salePattern.test(line));
+      const nearby = saleIndex >= 0
+        ? lines.slice(Math.max(0, saleIndex - 3), saleIndex + 1).reverse()
+        : lines.slice(0, 4);
+
+      for (const line of nearby) {
+        const candidate = cleanName(line);
+        if (candidate && !salePattern.test(candidate)) return candidate;
+      }
+
+      return "";
+    };
+
+    const elements = [...document.querySelectorAll("body *")]
+      .filter((element) => {
+        const ownText = this.normalize(
+          [...element.childNodes]
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => node.textContent)
+            .join(" ")
+        );
+        const fullText = this.normalize(element.innerText);
+        return salePattern.test(ownText || fullText);
+      });
+
+    const events = [];
+    const seen = new Set();
+
+    for (const element of elements) {
+      const text = this.normalize(element.innerText);
+      if (!text || text.length > 500) continue;
+
+      const buyerName = findBuyerName(element, text);
+      const id = `${buyerName}|${text}`.toLowerCase();
+
+      if (seen.has(id)) continue;
+      seen.add(id);
+
+      events.push({
+        id,
         text,
-        createdAt: new Date().toISOString()
-      }));
+        buyerName,
+        detectedAt: new Date().toISOString()
+      });
+    }
+
+    return events.slice(-50);
   },
 
   collectChat() {
@@ -1031,7 +1128,7 @@ window.OrionDetector = {
       const container = this.findActionContainer(button);
       const text = this.normalize(container?.innerText || button.innerText);
       const coupon =
-        /cupom|voucher|desconto|oferta relâmpago|oferta relampago/i.test(text);
+        /cupom|voucher|desconto|código promocional|codigo promocional|oferta relâmpago|oferta relampago/i.test(text);
 
       let score = 0;
 
@@ -1050,7 +1147,17 @@ window.OrionDetector = {
       ? ranked.filter((item) => !item.coupon)
       : ranked;
 
-    const target = (eligible.length ? eligible : ranked)
+    // Regra obrigatória: nunca fixar cupom, voucher ou desconto.
+    // Se somente cupons forem encontrados, não clica em nada.
+    if (skipCoupons && !eligible.length) {
+      return {
+        ok: false,
+        error: "Produto principal não localizado. Cupons foram ignorados.",
+        skippedCoupons: true
+      };
+    }
+
+    const target = eligible
       .sort((a, b) => b.score - a.score)[0];
 
     if (!target) {

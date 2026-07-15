@@ -1,0 +1,7 @@
+LIVE INFINITY v1.2.6
+
+Correção do agradecimento de compra:
+- Detecta o nome real dentro do cartão/aviso da venda.
+- Usa campos de comprador, usuário, apelido e nome próximos ao evento.
+- Não usa mais Cliente 1, Cliente 2 ou nomes genéricos.
+- Sem nome real disponível, envia mensagem neutra sem inventar nome.

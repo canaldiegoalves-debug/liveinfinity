@@ -1,0 +1,12 @@
+LIVE INFINITY - EXTENSÃO CORRIGIDA
+
+API configurada para:
+https://admin.valoranegocios.com.br
+
+Instalação:
+1. Extraia este ZIP.
+2. Abra chrome://extensions
+3. Ative o Modo do desenvolvedor.
+4. Remova a extensão antiga.
+5. Clique em Carregar sem compactação.
+6. Selecione a pasta extension extraída.

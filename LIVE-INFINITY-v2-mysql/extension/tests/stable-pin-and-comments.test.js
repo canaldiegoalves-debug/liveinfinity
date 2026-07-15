@@ -16,7 +16,7 @@ const checks = [
   ["twenty-second pin cycle remains", /setInterval\(\(\) => \{\s*this\.refreshProductCycle\("scheduled-20s"\);\s*\}, 20000\)/s.test(controller)],
   ["unpin button is source of truth", /const unpin = this\.findUnpinButton\(\)/.test(detector)],
   ["unpin before pin", /unpin\.element\.click\(\)[\s\S]*this\.pinMainProduct/s.test(detector)],
-  ["first comment sends immediately", /sendFirstCommentAndSchedule/.test(controller)],
+  ["first comment waits configured interval", !/sendFirstCommentAndSchedule/.test(controller) && /this\.commentIndex = 0;[\s\S]*this\.scheduleNextComment\(\)/.test(controller)],
   ["comments are sequential", /comments\[this\.commentIndex % comments\.length\]/.test(controller)],
   ["random interval remains", /Math\.floor\(Math\.random\(\) \* \(maximum - minimum \+ 1\)\) \+ minimum/.test(controller)],
   ["native textarea setter exists", /HTMLTextAreaElement\.prototype/.test(detector)],

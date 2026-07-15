@@ -8,6 +8,8 @@ const OrionContentAutomation = {
   autoPinBusy: false,
   seenSales: new Set(),
   previousLiveState: false,
+  endTimerBusy: false,
+  completedEndTimerAt: null,
 
   async init() {
     await this.loadSettings();
@@ -28,6 +30,7 @@ const OrionContentAutomation = {
     setInterval(() => {
       this.handleLiveTransition();
       this.handleSales();
+      this.handleEndTimer();
     }, 1000);
   },
 
@@ -51,31 +54,8 @@ const OrionContentAutomation = {
     if (!this.settings.commentsEnabled) return;
     if (!Array.isArray(this.settings.comments) || !this.settings.comments.length) return;
 
-    this.sendFirstCommentAndSchedule();
-  },
-
-  async sendFirstCommentAndSchedule() {
-    const comments = (this.settings.comments || [])
-      .map((value) => String(value || "").trim())
-      .filter(Boolean);
-
-    if (!comments.length || !this.settings.commentsEnabled) return;
-
-    const firstMessage = comments[0];
-    const result = await OrionDetector.sendChat(firstMessage);
-
-    chrome.runtime.sendMessage({
-      type: "ORION_AUTOMATION_EVENT",
-      payload: {
-        kind: result.ok ? "comment-sent" : "comment-failed",
-        message: firstMessage,
-        delaySeconds: 0,
-        result,
-        createdAt: new Date().toISOString()
-      }
-    }).catch(() => {});
-
-    this.commentIndex = 1;
+    // O primeiro comentário também respeita o intervalo definido no painel.
+    this.commentIndex = 0;
     this.scheduleNextComment();
   },
 
@@ -90,8 +70,16 @@ const OrionContentAutomation = {
 
     if (!comments.length) return;
 
-    const minimum = Math.max(5, Number(this.settings.minCommentDelay) || 45);
-    const maximum = Math.max(minimum, Number(this.settings.maxCommentDelay) || 90);
+    const configuredMinimum = Number(this.settings.minCommentDelay);
+    const configuredMaximum = Number(this.settings.maxCommentDelay);
+    const minimum = Math.max(
+      5,
+      Number.isFinite(configuredMinimum) ? Math.floor(configuredMinimum) : 45
+    );
+    const maximum = Math.max(
+      minimum,
+      Number.isFinite(configuredMaximum) ? Math.floor(configuredMaximum) : 90
+    );
     const seconds =
       Math.floor(Math.random() * (maximum - minimum + 1)) + minimum;
 
@@ -188,6 +176,73 @@ const OrionContentAutomation = {
   },
 
 
+  async handleEndTimer() {
+    const endTimerAt = Number(this.settings.endTimerAt || 0);
+
+    if (!endTimerAt) return;
+    if (Date.now() < endTimerAt) return;
+    if (this.endTimerBusy) return;
+    if (this.completedEndTimerAt === endTimerAt) return;
+
+    this.endTimerBusy = true;
+    this.completedEndTimerAt = endTimerAt;
+
+    try {
+      // Para as automações antes de encerrar a transmissão.
+      clearTimeout(this.commentTimer);
+      clearInterval(this.autoPinTimer);
+      this.commentTimer = null;
+      this.autoPinTimer = null;
+      this.autoPinBusy = false;
+
+      const result = await OrionDetector.endLive({ dryRun: false });
+
+      this.settings.endTimerAt = null;
+
+      await chrome.storage.local.set({
+        [ORION.STORAGE.SETTINGS]: this.settings
+      });
+
+      chrome.runtime.sendMessage({
+        type: "ORION_AUTOMATION_EVENT",
+        payload: {
+          kind: result.ok ? "timer-live-ended" : "timer-live-end-failed",
+          result,
+          scheduledAt: endTimerAt,
+          createdAt: new Date().toISOString()
+        }
+      }).catch(() => {});
+
+      chrome.runtime.sendMessage({
+        type: "ORION_NOTIFY",
+        payload: {
+          title: result.ok
+            ? "LIVE encerrada"
+            : "Falha ao encerrar a LIVE",
+          message: result.ok
+            ? "O tempo programado terminou e a transmissão foi encerrada."
+            : result.error
+        }
+      }).catch(() => {});
+    } catch (error) {
+      this.settings.endTimerAt = null;
+
+      await chrome.storage.local.set({
+        [ORION.STORAGE.SETTINGS]: this.settings
+      });
+
+      chrome.runtime.sendMessage({
+        type: "ORION_NOTIFY",
+        payload: {
+          title: "Falha ao encerrar a LIVE",
+          message: error?.message || "Erro inesperado no encerramento automático."
+        }
+      }).catch(() => {});
+    } finally {
+      this.endTimerBusy = false;
+    }
+  },
+
   async handleLiveTransition() {
     const isLive = Boolean(OrionDetector.state.live);
 
@@ -231,12 +286,27 @@ const OrionContentAutomation = {
       this.seenSales.add(sale.id);
 
       if (this.settings.postSaleEnabled) {
-        const name =
-          sale.text.match(/^(.+?)\s+(?:comprou|acabou)/i)?.[1]?.trim() ||
-          "cliente";
+        const extractedName =
+          String(sale.buyerName || "").trim() ||
+          sale.text.match(
+            /^(.+?)\s+(?:comprou|acabou de comprar|finalizou a compra|realizou um pedido)/i
+          )?.[1]?.trim() ||
+          "";
 
-        const message = String(this.settings.postSaleMessage || "")
-          .replace(/\{nome\}/gi, name);
+        const name = /^(cliente|cliente\s*\d+|comprador|usuário|usuario|user)$/i.test(
+          extractedName
+        )
+          ? ""
+          : extractedName;
+
+        const messageTemplate = String(this.settings.postSaleMessage || "");
+        const message = name
+          ? messageTemplate.replace(/\{nome\}/gi, name)
+          : messageTemplate
+              .replace(/(?:Olá|Oi|Parabéns|Obrigado|Obrigada)[, ]*\{nome\}[!,. ]*/gi, "")
+              .replace(/\{nome\}/gi, "")
+              .replace(/\s{2,}/g, " ")
+              .trim();
 
         if (message.trim()) {
           await OrionDetector.sendChat(message);

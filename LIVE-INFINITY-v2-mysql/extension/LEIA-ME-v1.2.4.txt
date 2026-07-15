@@ -1,0 +1,7 @@
+LIVE INFINITY v1.2.4
+
+Correções:
+- O primeiro comentário aguarda o intervalo configurado.
+- Os próximos comentários respeitam mínimo e máximo do painel.
+- Cupom, voucher e desconto nunca são fixados.
+- Se o produto principal não for localizado, nenhuma opção de cupom é clicada.

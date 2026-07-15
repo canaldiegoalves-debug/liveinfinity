@@ -1,0 +1,8 @@
+LIVE INFINITY v1.2.5
+
+Correção do encerramento automático:
+- O horário final fica salvo na extensão.
+- O timer continua funcionando mesmo com o painel lateral fechado.
+- Ao chegar a zero, comentários e fixação automática são interrompidos.
+- A extensão aciona Encerrar LIVE e confirma o encerramento.
+- O timer é limpo após a execução para não repetir o clique.
