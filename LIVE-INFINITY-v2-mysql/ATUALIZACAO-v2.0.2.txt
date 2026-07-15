@@ -1,0 +1,13 @@
+LIVE INFINITY v2.0.2
+
+CORREÇÃO DEFINITIVA DO FORMULÁRIO
+- As páginas Licenças e Suporte não são mais reconstruídas automaticamente.
+- O servidor continua buscando dados em segundo plano.
+- Quando houver dados novos, aparece a mensagem para clicar em Atualizar.
+- E-mail, dias, valores, observações e chamados não são mais apagados.
+- Dashboard, Usuários, Faturamento e Relatórios continuam atualizando automaticamente.
+- Extensão mantém o cursor e não perde a licença por oscilação temporária.
+
+VERSÕES
+- Backend/Admin: 2.0.2
+- Extensão: 1.1.3

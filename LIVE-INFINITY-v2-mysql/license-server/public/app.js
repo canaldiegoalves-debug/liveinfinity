@@ -26,35 +26,8 @@ const state = {
   page: "dashboard",
   loading: false,
   refreshTimer: null,
-  userEditing: false,
-  pendingRender: false,
-  editingReleaseTimer: null
+  updatesAvailable: false
 };
-
-
-function isEditableAdminElement(element) {
-  return Boolean(
-    element &&
-    (
-      element.matches?.("input, textarea, select") ||
-      element.isContentEditable
-    )
-  );
-}
-
-function isEditingAdmin() {
-  return state.userEditing || isEditableAdminElement(document.activeElement);
-}
-
-function renderPageWhenSafe() {
-  if (isEditingAdmin()) {
-    state.pendingRender = true;
-    return;
-  }
-
-  state.pendingRender = false;
-  renderPage();
-}
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -112,7 +85,7 @@ function showApp() {
   elements.app.classList.remove("hidden");
 }
 
-async function loadData({ silent = false } = {}) {
+async function loadData({ silent = false, render = true } = {}) {
   if (state.loading) return;
   state.loading = true;
 
@@ -127,7 +100,14 @@ async function loadData({ silent = false } = {}) {
     elements.lastUpdate.textContent =
       `Atualizado às ${new Date().toLocaleTimeString("pt-BR")}`;
 
-    renderPageWhenSafe();
+    if (render) {
+      state.updatesAvailable = false;
+      renderPage();
+    } else {
+      state.updatesAvailable = true;
+      elements.lastUpdate.textContent =
+        `Dados novos recebidos às ${new Date().toLocaleTimeString("pt-BR")} · clique em Atualizar`;
+    }
   } catch (error) {
     if (!silent) alert(error.message);
   } finally {
@@ -550,33 +530,6 @@ function renderPage() {
   (pages[state.page] || dashboardPage)();
 }
 
-
-document.addEventListener("focusin", event => {
-  if (isEditableAdminElement(event.target)) {
-    clearTimeout(state.editingReleaseTimer);
-    state.userEditing = true;
-  }
-}, true);
-
-document.addEventListener("input", event => {
-  if (isEditableAdminElement(event.target)) {
-    clearTimeout(state.editingReleaseTimer);
-    state.userEditing = true;
-  }
-}, true);
-
-document.addEventListener("focusout", () => {
-  clearTimeout(state.editingReleaseTimer);
-
-  state.editingReleaseTimer = setTimeout(() => {
-    state.userEditing = isEditableAdminElement(document.activeElement);
-
-    if (state.pendingRender && !state.userEditing) {
-      renderPageWhenSafe();
-    }
-  }, 450);
-}, true);
-
 elements.nav.addEventListener("click", event => {
   const button = event.target.closest("[data-page]");
   if (button) setPage(button.dataset.page);
@@ -615,13 +568,23 @@ elements.logout.onclick = () => {
   showLogin();
 };
 
-elements.refresh.onclick = () => loadData();
+elements.refresh.onclick = () => loadData({ render: true });
 
 function startAutoRefresh() {
   clearInterval(state.refreshTimer);
+
   state.refreshTimer = setInterval(() => {
-    if (state.token) loadData({ silent: true });
-  }, 4000);
+    if (!state.token) return;
+
+    const pageHasForm =
+      state.page === "licenses" ||
+      state.page === "support";
+
+    loadData({
+      silent: true,
+      render: !pageHasForm
+    });
+  }, 5000);
 }
 
 (async () => {
