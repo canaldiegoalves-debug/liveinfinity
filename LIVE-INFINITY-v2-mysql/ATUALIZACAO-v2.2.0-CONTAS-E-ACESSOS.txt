@@ -1,0 +1,7 @@
+LIVE INFINITY v2.2.0
+
+- E-mail da compra passa a ser a conta principal.
+- Cada chave recebe um e-mail de acesso único.
+- O Admin possui botão "Nova chave" por conta.
+- O sistema sugere variações como cliente+acesso2@email.com.
+- Básico: 1 chave; PRO: 2; Premium: ilimitadas.

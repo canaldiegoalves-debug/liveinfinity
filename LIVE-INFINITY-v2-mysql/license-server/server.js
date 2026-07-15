@@ -172,7 +172,7 @@ async function accountKeyUsage(email) {
   const [rows] = await pool.execute(
     `SELECT COUNT(*) AS total
      FROM licenses
-     WHERE email=? AND active=1`,
+     WHERE account_email=? AND active=1`,
     [email]
   );
 
@@ -225,6 +225,20 @@ function readBody(request) {
 
     request.on("error", reject);
   });
+}
+
+function splitEmail(value) {
+  const email = normalizeEmail(value);
+  const at = email.lastIndexOf("@");
+  if (at <= 0) return null;
+  return { local: email.slice(0, at), domain: email.slice(at + 1) };
+}
+
+function suggestedAccessEmail(accountEmail, position) {
+  const parts = splitEmail(accountEmail);
+  if (!parts) return "";
+  if (position <= 1) return accountEmail;
+  return `${parts.local}+acesso${position}@${parts.domain}`;
 }
 
 function normalizeEmail(value) {
@@ -280,7 +294,9 @@ function rowToLicense(row) {
 
   return {
     id: row.id,
-    email: row.email,
+    email: row.access_email || row.email,
+    accountEmail: row.account_email || row.email,
+    accessEmail: row.access_email || row.email,
     key: row.license_key,
     plan: row.plan,
     durationDays: Number(row.duration_days),
@@ -314,7 +330,7 @@ function validateLicenseRecord(row, email, key, deviceId) {
   if (!row.active || row.status === "revoked") {
     return { ok: false, error: "Esta licença foi bloqueada." };
   }
-  if (normalizeEmail(row.email) !== normalizeEmail(email)) {
+  if (normalizeEmail(row.access_email || row.email) !== normalizeEmail(email)) {
     return { ok: false, error: "O e-mail não corresponde à chave." };
   }
   if (row.license_key !== String(key || "").trim().toUpperCase()) {
@@ -598,7 +614,7 @@ const server = http.createServer(async (request, response) => {
              COUNT(l.id) AS keys_created,
              SUM(CASE WHEN l.active=1 THEN 1 ELSE 0 END) AS keys_active
            FROM customer_accounts a
-           LEFT JOIN licenses l ON l.email=a.email
+           LEFT JOIN licenses l ON l.account_email=a.email
            GROUP BY a.email
            ORDER BY a.created_at DESC`
         );
@@ -670,15 +686,16 @@ const server = http.createServer(async (request, response) => {
 
       if (url.pathname === "/api/admin/licenses" && request.method === "POST") {
         const body = await readBody(request);
-        const email = normalizeEmail(body.email);
+        const accountEmail = normalizeEmail(body.accountEmail || body.email);
+        const requestedAccessEmail = normalizeEmail(body.accessEmail);
         const durationDays = Number(body.durationDays);
         const plan = normalizePlan(body.plan);
         const note = String(body.note || "").trim();
         const amountPaid = Math.max(0, Number(body.amountPaid || 0));
         const paymentMethod = String(body.paymentMethod || "").trim();
 
-        if (!email || !email.includes("@")) {
-          json(response, 400, { ok: false, error: "Digite um e-mail válido." });
+        if (!accountEmail || !accountEmail.includes("@")) {
+          json(response, 400, { ok: false, error: "Digite um e-mail de compra válido." });
           return;
         }
         if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 36500) {
@@ -689,8 +706,24 @@ const server = http.createServer(async (request, response) => {
           return;
         }
 
-        const accountPlan = await upsertCustomerAccount(email, plan);
-        const usedKeys = await accountKeyUsage(email);
+        const accountPlan = await upsertCustomerAccount(accountEmail, plan);
+        const usedKeys = await accountKeyUsage(accountEmail);
+        const accessEmail = requestedAccessEmail || suggestedAccessEmail(accountEmail, usedKeys + 1);
+
+        if (!accessEmail || !accessEmail.includes("@")) {
+          json(response, 400, { ok: false, error: "Digite um e-mail de acesso válido." });
+          return;
+        }
+
+        const [existingAccess] = await pool.execute(
+          "SELECT id FROM licenses WHERE access_email=? LIMIT 1",
+          [accessEmail]
+        );
+
+        if (existingAccess.length) {
+          json(response, 409, { ok: false, error: "Este e-mail de acesso já está em uso." });
+          return;
+        }
 
         if (
           accountPlan.keyLimit !== null &&
@@ -713,9 +746,9 @@ const server = http.createServer(async (request, response) => {
           try {
             await pool.execute(
               `INSERT INTO licenses
-               (id,email,license_key,plan,duration_days,note,amount_paid,payment_method)
-               VALUES (?,?,?,?,?,?,?,?)`,
-              [id,email,key,plan,durationDays,note || null,amountPaid,paymentMethod || null]
+               (id,account_email,access_email,email,license_key,plan,duration_days,note,amount_paid,payment_method)
+               VALUES (?,?,?,?,?,?,?,?,?,?)`,
+              [id,accountEmail,accessEmail,accessEmail,key,plan,durationDays,note || null,amountPaid,paymentMethod || null]
             );
             break;
           } catch (error) {
@@ -724,7 +757,7 @@ const server = http.createServer(async (request, response) => {
         }
 
         const row = await findLicenseByKey(key);
-        await logEvent(request, "license_created", id, email, { plan, durationDays });
+        await logEvent(request, "license_created", id, accessEmail, { accountEmail, accessEmail, plan, durationDays });
         json(response, 201, { ok: true, license: rowToLicense(row) });
         return;
       }
@@ -855,10 +888,11 @@ const server = http.createServer(async (request, response) => {
           );
 
           if (plan) {
-            await upsertCustomerAccount(row.email, plan);
+            const ownerEmail = row.account_email || row.email;
+            await upsertCustomerAccount(ownerEmail, plan);
             await pool.execute(
-              "UPDATE licenses SET plan=? WHERE email=?",
-              [plan, row.email]
+              "UPDATE licenses SET plan=? WHERE account_email=?",
+              [plan, ownerEmail]
             );
           }
 

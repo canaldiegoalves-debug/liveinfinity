@@ -79,6 +79,20 @@ function keyLimitText(plan) {
     : String(meta.keyLimit);
 }
 
+function suggestAccessEmail(accountEmail, position) {
+  const email = String(accountEmail || "").trim().toLowerCase();
+  const at = email.lastIndexOf("@");
+  if (at <= 0) return "";
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (position <= 1) return email;
+  return `${local}+acesso${position}@${domain}`;
+}
+
+function accountForEmail(email) {
+  return state.accounts.find(account => account.email === String(email || "").trim().toLowerCase());
+}
+
 function money(value) {
   return Number(value || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -236,7 +250,9 @@ function licenseCard(license) {
 
   node.querySelector(".license-plan").textContent =
     `PLANO ${planMeta(license.plan).name.toUpperCase()}`;
-  node.querySelector(".license-email").textContent = license.email;
+  node.querySelector(".license-email").textContent = `Acesso: ${license.accessEmail || license.email}`;
+  const accountEl = node.querySelector(".license-account-email");
+  if (accountEl) accountEl.textContent = `Compra: ${license.accountEmail || license.email}`;
   node.querySelector(".license-key").textContent = license.key;
 
   const statusElement = node.querySelector(".license-status");
@@ -415,21 +431,13 @@ function licensesPage() {
 }
 
 function usersTable(accounts) {
-  if (!accounts.length) {
-    return '<div class="empty">Nenhuma conta cadastrada.</div>';
-  }
+  if (!accounts.length) return '<div class="empty">Nenhuma conta cadastrada.</div>';
 
   return `<table class="table">
-    <thead>
-      <tr>
-        <th>Cliente</th>
-        <th>Plano</th>
-        <th>Mensalidade</th>
-        <th>Chaves utilizadas</th>
-        <th>Limite</th>
-        <th>Assinatura</th>
-      </tr>
-    </thead>
+    <thead><tr>
+      <th>E-mail da compra</th><th>Plano</th><th>Mensalidade</th>
+      <th>Chaves</th><th>Limite</th><th>Assinatura</th><th>Ação</th>
+    </tr></thead>
     <tbody>${accounts.map(account => `<tr>
       <td>${account.email}</td>
       <td>${planMeta(account.plan).name}</td>
@@ -437,6 +445,8 @@ function usersTable(accounts) {
       <td>${account.keysActive}</td>
       <td>${account.keyLimit === null ? "Ilimitadas" : account.keyLimit}</td>
       <td>${account.subscriptionStatus}</td>
+      <td><button class="secondary create-key-for-account"
+        data-account-email="${account.email}" data-plan="${account.plan}">Nova chave</button></td>
     </tr>`).join("")}</tbody>
   </table>`;
 }
@@ -662,6 +672,23 @@ function renderPage() {
 
   (pages[state.page] || dashboardPage)();
 }
+
+elements.content.addEventListener("click", event => {
+  const button = event.target.closest(".create-key-for-account");
+  if (!button) return;
+
+  state.page = "licenses";
+  renderPage();
+
+  const accountEmail = button.dataset.accountEmail;
+  const account = accountForEmail(accountEmail);
+  const nextPosition = Number(account?.keysCreated || 0) + 1;
+
+  document.getElementById("new-account-email").value = accountEmail;
+  document.getElementById("new-access-email").value = suggestAccessEmail(accountEmail, nextPosition);
+  document.getElementById("new-plan").value = button.dataset.plan || "basic";
+  document.getElementById("new-access-email").focus();
+});
 
 elements.nav.addEventListener("click", event => {
   const button = event.target.closest("[data-page]");

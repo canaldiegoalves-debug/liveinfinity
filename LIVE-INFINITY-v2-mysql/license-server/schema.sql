@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS customer_accounts (
 
 CREATE TABLE IF NOT EXISTS licenses (
   id CHAR(36) PRIMARY KEY,
+  account_email VARCHAR(255) NOT NULL,
+  access_email VARCHAR(255) NOT NULL,
   email VARCHAR(255) NOT NULL,
   license_key VARCHAR(100) NOT NULL UNIQUE,
   plan ENUM('basic','pro','premium') NOT NULL DEFAULT 'basic',
@@ -31,7 +33,9 @@ CREATE TABLE IF NOT EXISTS licenses (
   last_validation_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_licenses_access_email (access_email),
   INDEX idx_licenses_email (email),
+  INDEX idx_licenses_account_email (account_email),
   INDEX idx_licenses_status (status),
   INDEX idx_licenses_expires (expires_at),
   INDEX idx_licenses_last_validation (last_validation_at)

@@ -118,3 +118,5 @@ button:hover{filter:brightness(1.14)}
 @media(max-width:850px){
   .plan-cards{grid-template-columns:1fr}
 }
+
+.input-action-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.license-account-email{margin-top:3px;font-size:10px}
