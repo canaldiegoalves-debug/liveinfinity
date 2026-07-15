@@ -598,6 +598,73 @@ const server = http.createServer(async (request, response) => {
       }
 
 
+
+      const accountPlanMatch = url.pathname.match(
+        /^\/api\/admin\/accounts\/(.+)\/plan$/
+      );
+
+      if (accountPlanMatch && request.method === "PATCH") {
+        const accountEmail = normalizeEmail(
+          decodeURIComponent(accountPlanMatch[1])
+        );
+        const body = await readBody(request);
+        const plan = normalizePlan(body.plan);
+        const definition = planDefinition(plan);
+
+        const [accountRows] = await pool.execute(
+          "SELECT * FROM customer_accounts WHERE email=? LIMIT 1",
+          [accountEmail]
+        );
+
+        if (!accountRows.length) {
+          json(response, 404, {
+            ok: false,
+            error: "Conta do cliente não encontrada."
+          });
+          return;
+        }
+
+        const usedKeys = await accountKeyUsage(accountEmail);
+
+        if (
+          definition.keyLimit !== null &&
+          usedKeys > definition.keyLimit
+        ) {
+          json(response, 409, {
+            ok: false,
+            error:
+              `O cliente possui ${usedKeys} chaves ativas. ` +
+              `O plano ${definition.name} permite apenas ${definition.keyLimit}.`
+          });
+          return;
+        }
+
+        await upsertCustomerAccount(accountEmail, plan);
+
+        await pool.execute(
+          "UPDATE licenses SET plan=? WHERE account_email=?",
+          [plan, accountEmail]
+        );
+
+        await logEvent(request, "account_plan_changed", null, accountEmail, {
+          plan,
+          monthlyPrice: definition.monthlyPrice,
+          keyLimit: definition.keyLimit
+        });
+
+        json(response, 200, {
+          ok: true,
+          account: {
+            email: accountEmail,
+            plan,
+            planName: definition.name,
+            monthlyPrice: definition.monthlyPrice,
+            keyLimit: definition.keyLimit
+          }
+        });
+        return;
+      }
+
       if (url.pathname === "/api/admin/accounts" && request.method === "GET") {
         const [accountRows] = await pool.query(
           `SELECT

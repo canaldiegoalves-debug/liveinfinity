@@ -25,6 +25,7 @@ const state = {
   accounts: [],
   tickets: [],
   caktoEvents: [],
+  pendingNewKeyAccount: null,
   page: "dashboard",
   loading: false,
   refreshTimer: null,
@@ -479,6 +480,57 @@ function accountKeysHtml(account) {
   </div>`;
 }
 
+
+function newKeyModalHtml() {
+  const account = state.pendingNewKeyAccount;
+
+  if (!account) return "";
+
+  const nextPosition = Number(account.keysCreated || 0) + 1;
+  const suggestedEmail = suggestAccessEmail(account.email, nextPosition);
+
+  return `
+    <div class="modal-backdrop" id="new-key-modal">
+      <section class="modal-card">
+        <div class="card-head">
+          <div>
+            <small>NOVA CHAVE</small>
+            <h2>${account.email}</h2>
+          </div>
+          <button class="secondary" id="close-new-key-modal">Fechar</button>
+        </div>
+
+        <label>E-mail da compra</label>
+        <input id="modal-account-email" type="email" value="${account.email}" disabled />
+
+        <label>E-mail de acesso da nova chave</label>
+        <input
+          id="modal-access-email"
+          type="email"
+          value="${suggestedEmail}"
+        />
+
+        <label>Plano</label>
+        <select id="modal-plan">
+          <option value="basic" ${account.plan === "basic" ? "selected" : ""}>Básico</option>
+          <option value="pro" ${account.plan === "pro" ? "selected" : ""}>PRO</option>
+          <option value="premium" ${account.plan === "premium" ? "selected" : ""}>Premium</option>
+        </select>
+
+        <label>Duração</label>
+        <input id="modal-duration-days" type="number" min="1" value="30" />
+
+        <label>Observação</label>
+        <textarea id="modal-note" placeholder="Opcional"></textarea>
+
+        <button class="primary full" id="confirm-create-account-key">
+          Criar chave
+        </button>
+      </section>
+    </div>
+  `;
+}
+
 function usersTable(accounts) {
   if (!accounts.length) {
     return '<div class="empty">Nenhuma conta cadastrada.</div>';
@@ -507,6 +559,14 @@ function usersTable(accounts) {
               </span>
 
               <button
+                class="secondary change-account-plan"
+                data-account-email="${account.email}"
+                data-plan="${account.plan}"
+              >
+                Mudar plano
+              </button>
+
+              <button
                 class="${canCreate ? "primary" : "secondary"} create-key-for-account"
                 data-account-email="${account.email}"
                 data-plan="${account.plan}"
@@ -531,7 +591,8 @@ function usersPage() {
     <article class="card">
       <div class="card-head"><div><small>USUÁRIOS</small><h2>Presença e dispositivos</h2></div></div>
       ${usersTable(state.accounts)}
-    </article>`;
+    </article>
+    ${newKeyModalHtml()}`;
 }
 
 function financePage() {
@@ -752,19 +813,79 @@ elements.content.addEventListener("click", async event => {
   if (createButton) {
     if (createButton.disabled) return;
 
-    state.page = "licenses";
+    const account = accountForEmail(createButton.dataset.accountEmail);
+    state.pendingNewKeyAccount = account;
     renderPage();
+    return;
+  }
 
-    const accountEmail = createButton.dataset.accountEmail;
-    const account = accountForEmail(accountEmail);
-    const nextPosition = Number(account?.keysCreated || 0) + 1;
+  const closeModal = event.target.closest("#close-new-key-modal");
 
-    document.getElementById("new-account-email").value = accountEmail;
-    document.getElementById("new-access-email").value =
-      suggestAccessEmail(accountEmail, nextPosition);
-    document.getElementById("new-plan").value =
-      createButton.dataset.plan || "basic";
-    document.getElementById("new-access-email").focus();
+  if (closeModal) {
+    state.pendingNewKeyAccount = null;
+    renderPage();
+    return;
+  }
+
+  const confirmCreate = event.target.closest("#confirm-create-account-key");
+
+  if (confirmCreate) {
+    const account = state.pendingNewKeyAccount;
+    const accessEmail =
+      document.getElementById("modal-access-email").value;
+    const plan =
+      document.getElementById("modal-plan").value;
+    const durationDays = Number(
+      document.getElementById("modal-duration-days").value
+    );
+    const note =
+      document.getElementById("modal-note").value;
+
+    await api("/api/admin/licenses", {
+      method: "POST",
+      body: JSON.stringify({
+        accountEmail: account.email,
+        accessEmail,
+        plan,
+        durationDays,
+        note
+      })
+    });
+
+    state.pendingNewKeyAccount = null;
+    await loadData({ render: true });
+    return;
+  }
+
+  const changePlanButton = event.target.closest(".change-account-plan");
+
+  if (changePlanButton) {
+    const accountEmail = changePlanButton.dataset.accountEmail;
+    const currentPlan = changePlanButton.dataset.plan;
+    const selected = prompt(
+      "Digite o novo plano: BASICO, PRO ou PREMIUM",
+      planMeta(currentPlan).name.toUpperCase()
+    );
+
+    if (!selected) return;
+
+    const normalized = selected.trim().toLowerCase();
+    const plan =
+      normalized === "premium"
+        ? "premium"
+        : normalized === "pro"
+          ? "pro"
+          : "basic";
+
+    await api(
+      `/api/admin/accounts/${encodeURIComponent(accountEmail)}/plan`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ plan })
+      }
+    );
+
+    await loadData({ render: true });
     return;
   }
 

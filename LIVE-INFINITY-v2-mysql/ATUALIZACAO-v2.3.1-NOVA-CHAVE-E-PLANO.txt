@@ -1,0 +1,9 @@
+LIVE INFINITY v2.3.1
+
+CORREÇÕES
+- O botão Nova chave agora abre uma janela dentro da própria página Clientes.
+- Não redireciona mais para a lista de licenças.
+- A janela já traz e-mail da compra, sugestão de e-mail de acesso, plano e duração.
+- Foi adicionado o botão Mudar plano em cada conta.
+- Alteração de plano atualiza todas as chaves da conta.
+- O sistema impede downgrade quando o número de chaves ultrapassa o limite do novo plano.
