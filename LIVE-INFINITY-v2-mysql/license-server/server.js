@@ -599,7 +599,7 @@ const server = http.createServer(async (request, response) => {
 
 
       if (url.pathname === "/api/admin/accounts" && request.method === "GET") {
-        const [rows] = await pool.query(
+        const [accountRows] = await pool.query(
           `SELECT
              a.email,
              a.plan,
@@ -610,32 +610,52 @@ const server = http.createServer(async (request, response) => {
              a.cakto_subscription_id,
              a.current_period_end,
              a.created_at,
-             a.updated_at,
-             COUNT(l.id) AS keys_created,
-             SUM(CASE WHEN l.active=1 THEN 1 ELSE 0 END) AS keys_active
+             a.updated_at
            FROM customer_accounts a
-           LEFT JOIN licenses l ON l.account_email=a.email
-           GROUP BY a.email
            ORDER BY a.created_at DESC`
         );
 
+        const [licenseRows] = await pool.query(
+          `SELECT *
+           FROM licenses
+           ORDER BY created_at DESC`
+        );
+
+        const licensesByAccount = new Map();
+
+        for (const row of licenseRows) {
+          const owner = row.account_email || row.email;
+
+          if (!licensesByAccount.has(owner)) {
+            licensesByAccount.set(owner, []);
+          }
+
+          licensesByAccount.get(owner).push(rowToLicense(row));
+        }
+
         json(response, 200, {
           ok: true,
-          accounts: rows.map(row => ({
-            email: row.email,
-            plan: row.plan,
-            planName: planDefinition(row.plan).name,
-            monthlyPrice: Number(row.monthly_price),
-            keyLimit: row.key_limit === null ? null : Number(row.key_limit),
-            subscriptionStatus: row.subscription_status,
-            caktoCustomerId: row.cakto_customer_id,
-            caktoSubscriptionId: row.cakto_subscription_id,
-            currentPeriodEnd: toIso(row.current_period_end),
-            keysCreated: Number(row.keys_created || 0),
-            keysActive: Number(row.keys_active || 0),
-            createdAt: toIso(row.created_at),
-            updatedAt: toIso(row.updated_at)
-          }))
+          accounts: accountRows.map(row => {
+            const keys = licensesByAccount.get(row.email) || [];
+            const keysActive = keys.filter(item => item.active).length;
+
+            return {
+              email: row.email,
+              plan: row.plan,
+              planName: planDefinition(row.plan).name,
+              monthlyPrice: Number(row.monthly_price),
+              keyLimit: row.key_limit === null ? null : Number(row.key_limit),
+              subscriptionStatus: row.subscription_status,
+              caktoCustomerId: row.cakto_customer_id,
+              caktoSubscriptionId: row.cakto_subscription_id,
+              currentPeriodEnd: toIso(row.current_period_end),
+              keysCreated: keys.length,
+              keysActive,
+              keys,
+              createdAt: toIso(row.created_at),
+              updatedAt: toIso(row.updated_at)
+            };
+          })
         });
         return;
       }
@@ -838,7 +858,45 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const licenseMatch = url.pathname.match(
+            const releaseDeviceMatch = url.pathname.match(
+        /^\/api\/admin\/licenses\/([^/]+)\/release-device$/
+      );
+
+      if (releaseDeviceMatch && request.method === "POST") {
+        const id = releaseDeviceMatch[1];
+
+        const [rows] = await pool.execute(
+          "SELECT * FROM licenses WHERE id=? LIMIT 1",
+          [id]
+        );
+
+        if (!rows.length) {
+          json(response, 404, {
+            ok: false,
+            error: "Licença não encontrada."
+          });
+          return;
+        }
+
+        await pool.execute(
+          `UPDATE licenses
+           SET device_id=NULL,device_name=NULL,last_validation_at=NULL
+           WHERE id=?`,
+          [id]
+        );
+
+        await logEvent(
+          request,
+          "device_released",
+          id,
+          rows[0].access_email || rows[0].email
+        );
+
+        json(response, 200, { ok: true });
+        return;
+      }
+
+const licenseMatch = url.pathname.match(
         /^\/api\/admin\/licenses\/([^/]+)(?:\/(renew|revoke|restore|reset-device))?$/
       );
 

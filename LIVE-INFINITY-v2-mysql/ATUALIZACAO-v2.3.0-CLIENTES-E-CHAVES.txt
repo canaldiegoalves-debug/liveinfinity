@@ -1,0 +1,12 @@
+LIVE INFINITY v2.3.0 — CLIENTES E CHAVES AGRUPADAS
+
+- Somente o Admin cria novas chaves.
+- Cada cliente aparece como uma conta principal pelo e-mail da compra.
+- As chaves ficam agrupadas dentro da conta.
+- Cada chave mostra e-mail de acesso, chave, status e computador.
+- Botão Nova chave respeita os limites do plano.
+- Básico bloqueia após 1 chave.
+- PRO bloqueia após 2 chaves.
+- Premium permanece sem limite.
+- Admin pode copiar a chave e liberar o computador vinculado.
+- Não existe área do cliente nem criação de chave pelo usuário.

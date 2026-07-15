@@ -430,25 +430,98 @@ function licensesPage() {
   };
 }
 
-function usersTable(accounts) {
-  if (!accounts.length) return '<div class="empty">Nenhuma conta cadastrada.</div>';
+function accountCanCreateKey(account) {
+  return account.keyLimit === null || account.keysCreated < account.keyLimit;
+}
 
-  return `<table class="table">
-    <thead><tr>
-      <th>E-mail da compra</th><th>Plano</th><th>Mensalidade</th>
-      <th>Chaves</th><th>Limite</th><th>Assinatura</th><th>Ação</th>
-    </tr></thead>
-    <tbody>${accounts.map(account => `<tr>
-      <td>${account.email}</td>
-      <td>${planMeta(account.plan).name}</td>
-      <td>${money(account.monthlyPrice)}</td>
-      <td>${account.keysActive}</td>
-      <td>${account.keyLimit === null ? "Ilimitadas" : account.keyLimit}</td>
-      <td>${account.subscriptionStatus}</td>
-      <td><button class="secondary create-key-for-account"
-        data-account-email="${account.email}" data-plan="${account.plan}">Nova chave</button></td>
-    </tr>`).join("")}</tbody>
-  </table>`;
+function accountKeyLimitLabel(account) {
+  return account.keyLimit === null ? "Ilimitadas" : String(account.keyLimit);
+}
+
+function accountKeysHtml(account) {
+  if (!account.keys?.length) {
+    return '<div class="empty compact">Nenhuma chave criada para esta conta.</div>';
+  }
+
+  return `<div class="account-keys">
+    ${account.keys.map((license, index) => `
+      <article class="account-key-item">
+        <div class="account-key-index">${index + 1}</div>
+
+        <div class="account-key-main">
+          <strong>${license.accessEmail || license.email}</strong>
+          <code>${license.key}</code>
+          <small>
+            ${license.deviceId ? "Computador vinculado" : "Aguardando ativação"}
+            · ${license.active ? "Ativa" : "Bloqueada"}
+          </small>
+        </div>
+
+        <div class="account-key-actions">
+          <button
+            class="secondary copy-account-key"
+            data-key="${license.key}"
+          >
+            Copiar
+          </button>
+
+          ${license.deviceId
+            ? `<button
+                class="secondary release-account-device"
+                data-license-id="${license.id}"
+              >
+                Liberar PC
+              </button>`
+            : ""}
+        </div>
+      </article>
+    `).join("")}
+  </div>`;
+}
+
+function usersTable(accounts) {
+  if (!accounts.length) {
+    return '<div class="empty">Nenhuma conta cadastrada.</div>';
+  }
+
+  return `<section class="customer-accounts">
+    ${accounts.map(account => {
+      const canCreate = accountCanCreateKey(account);
+      const meta = planMeta(account.plan);
+
+      return `
+        <article class="customer-account-card">
+          <header class="customer-account-header">
+            <div>
+              <small>CLIENTE / E-MAIL DA COMPRA</small>
+              <h3>${account.email}</h3>
+              <p>
+                Plano ${meta.name} · ${money(account.monthlyPrice)}/mês
+                · ${account.keysCreated}/${accountKeyLimitLabel(account)} chaves
+              </p>
+            </div>
+
+            <div class="customer-account-actions">
+              <span class="status-pill ${account.subscriptionStatus}">
+                ${account.subscriptionStatus}
+              </span>
+
+              <button
+                class="${canCreate ? "primary" : "secondary"} create-key-for-account"
+                data-account-email="${account.email}"
+                data-plan="${account.plan}"
+                ${canCreate ? "" : "disabled"}
+              >
+                ${canCreate ? "+ Nova chave" : "Limite atingido"}
+              </button>
+            </div>
+          </header>
+
+          ${accountKeysHtml(account)}
+        </article>
+      `;
+    }).join("")}
+  </section>`;
 }
 
 function usersPage() {
@@ -673,21 +746,55 @@ function renderPage() {
   (pages[state.page] || dashboardPage)();
 }
 
-elements.content.addEventListener("click", event => {
-  const button = event.target.closest(".create-key-for-account");
-  if (!button) return;
+elements.content.addEventListener("click", async event => {
+  const createButton = event.target.closest(".create-key-for-account");
 
-  state.page = "licenses";
-  renderPage();
+  if (createButton) {
+    if (createButton.disabled) return;
 
-  const accountEmail = button.dataset.accountEmail;
-  const account = accountForEmail(accountEmail);
-  const nextPosition = Number(account?.keysCreated || 0) + 1;
+    state.page = "licenses";
+    renderPage();
 
-  document.getElementById("new-account-email").value = accountEmail;
-  document.getElementById("new-access-email").value = suggestAccessEmail(accountEmail, nextPosition);
-  document.getElementById("new-plan").value = button.dataset.plan || "basic";
-  document.getElementById("new-access-email").focus();
+    const accountEmail = createButton.dataset.accountEmail;
+    const account = accountForEmail(accountEmail);
+    const nextPosition = Number(account?.keysCreated || 0) + 1;
+
+    document.getElementById("new-account-email").value = accountEmail;
+    document.getElementById("new-access-email").value =
+      suggestAccessEmail(accountEmail, nextPosition);
+    document.getElementById("new-plan").value =
+      createButton.dataset.plan || "basic";
+    document.getElementById("new-access-email").focus();
+    return;
+  }
+
+  const copyButton = event.target.closest(".copy-account-key");
+
+  if (copyButton) {
+    await navigator.clipboard.writeText(copyButton.dataset.key);
+    copyButton.textContent = "Copiado";
+    setTimeout(() => {
+      copyButton.textContent = "Copiar";
+    }, 1200);
+    return;
+  }
+
+  const releaseButton = event.target.closest(".release-account-device");
+
+  if (releaseButton) {
+    const confirmed = confirm(
+      "Liberar o computador vinculado a esta chave?"
+    );
+
+    if (!confirmed) return;
+
+    await api(
+      `/api/admin/licenses/${releaseButton.dataset.licenseId}/release-device`,
+      { method: "POST" }
+    );
+
+    await loadData({ render: true });
+  }
 });
 
 elements.nav.addEventListener("click", event => {
