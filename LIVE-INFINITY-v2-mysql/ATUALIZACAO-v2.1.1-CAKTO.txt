@@ -1,0 +1,14 @@
+LIVE INFINITY v2.1.1 — CAKTO EM MODO CAPTURA
+
+- Mantém a pasta oficial LIVE-INFINITY-v2-mysql.
+- Recebe e salva webhooks da Cakto.
+- Adiciona página Cakto ao painel Admin.
+- Já reconhece os códigos dos checkouts Básico, PRO e Premium.
+- Não cria nem bloqueia licenças automaticamente enquanto CAKTO_CAPTURE_ONLY=true.
+
+Configuração necessária no .env:
+CAKTO_CAPTURE_ONLY=true
+CAKTO_WEBHOOK_SECRET=SEU_SEGREDO
+CAKTO_CHECKOUT_BASIC=3477jz3_976117
+CAKTO_CHECKOUT_PRO=387ye5s_982831
+CAKTO_CHECKOUT_PREMIUM=3b3y7bp_982839

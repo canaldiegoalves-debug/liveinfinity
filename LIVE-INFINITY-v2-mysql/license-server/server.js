@@ -13,6 +13,174 @@ const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const PUBLIC_DIR = path.join(__dirname, "public");
 
+const CAKTO_CAPTURE_ONLY =
+  String(process.env.CAKTO_CAPTURE_ONLY || "true").toLowerCase() !== "false";
+
+const CAKTO_WEBHOOK_SECRET = process.env.CAKTO_WEBHOOK_SECRET || "";
+
+const CAKTO_CHECKOUT_MAP = Object.freeze({
+  [process.env.CAKTO_CHECKOUT_BASIC || "3477jz3_976117"]: "basic",
+  [process.env.CAKTO_CHECKOUT_PRO || "387ye5s_982831"]: "pro",
+  [process.env.CAKTO_CHECKOUT_PREMIUM || "3b3y7bp_982839"]: "premium"
+});
+
+function nestedValue(object, paths) {
+  for (const candidate of paths) {
+    const parts = candidate.split(".");
+    let value = object;
+
+    for (const part of parts) {
+      value = value?.[part];
+    }
+
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function findPlanInPayload(body) {
+  const serialized = JSON.stringify(body);
+
+  for (const [code, plan] of Object.entries(CAKTO_CHECKOUT_MAP)) {
+    if (code && serialized.includes(code)) return plan;
+  }
+
+  return null;
+}
+
+function caktoEventData(body) {
+  const eventType = String(nestedValue(body, [
+    "event",
+    "event_type",
+    "type",
+    "custom_id",
+    "data.event",
+    "data.custom_id"
+  ]) || "").toLowerCase();
+
+  const offerId = String(nestedValue(body, [
+    "offer.id",
+    "offer_id",
+    "data.offer.id",
+    "data.offer_id",
+    "order.offer.id",
+    "data.order.offer.id"
+  ]) || "");
+
+  const orderId = String(nestedValue(body, [
+    "order.id",
+    "order_id",
+    "data.order.id",
+    "data.id",
+    "id"
+  ]) || "");
+
+  const email = normalizeEmail(nestedValue(body, [
+    "customer.email",
+    "buyer.email",
+    "order.customer.email",
+    "data.customer.email",
+    "data.buyer.email",
+    "data.order.customer.email",
+    "email"
+  ]));
+
+  const paymentStatus = String(nestedValue(body, [
+    "order.status",
+    "status",
+    "data.order.status",
+    "data.status"
+  ]) || "").toLowerCase();
+
+  const eventId = String(nestedValue(body, [
+    "event_id",
+    "event.id",
+    "data.event_id",
+    "data.event.id"
+  ]) || `${orderId || "no-order"}:${eventType || paymentStatus || "unknown"}`);
+
+  return { eventId, eventType, offerId, orderId, email, paymentStatus };
+}
+
+function caktoSecretFromRequest(request, url, body) {
+  return String(
+    request.headers["x-cakto-secret"] ||
+    url.searchParams.get("secret") ||
+    body?.secret ||
+    ""
+  );
+}
+
+
+const PLAN_CATALOG = Object.freeze({
+  basic: {
+    code: "basic",
+    name: "Básico",
+    monthlyPrice: 97,
+    keyLimit: 1
+  },
+  pro: {
+    code: "pro",
+    name: "PRO",
+    monthlyPrice: 147,
+    keyLimit: 2
+  },
+  premium: {
+    code: "premium",
+    name: "Premium",
+    monthlyPrice: 197,
+    keyLimit: null
+  }
+});
+
+function normalizePlan(value) {
+  return Object.prototype.hasOwnProperty.call(PLAN_CATALOG, value)
+    ? value
+    : "basic";
+}
+
+function planDefinition(value) {
+  return PLAN_CATALOG[normalizePlan(value)];
+}
+
+async function upsertCustomerAccount(email, plan) {
+  const definition = planDefinition(plan);
+
+  await pool.execute(
+    `INSERT INTO customer_accounts
+      (email,plan,monthly_price,key_limit)
+     VALUES (?,?,?,?)
+     ON DUPLICATE KEY UPDATE
+       plan=VALUES(plan),
+       monthly_price=VALUES(monthly_price),
+       key_limit=VALUES(key_limit)`,
+    [
+      email,
+      definition.code,
+      definition.monthlyPrice,
+      definition.keyLimit
+    ]
+  );
+
+  return definition;
+}
+
+async function accountKeyUsage(email) {
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) AS total
+     FROM licenses
+     WHERE email=? AND active=1`,
+    [email]
+  );
+
+  return Number(rows[0]?.total || 0);
+}
+
+
+
 function json(response, status, payload) {
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -81,7 +249,12 @@ function adminAuthorized(request) {
 
 function generateKey(plan) {
   const random = crypto.randomBytes(10).toString("hex").toUpperCase();
-  const prefix = plan === "pro" ? "LIVEINF-PRO" : "LIVEINF-BASIC";
+  const prefix =
+    plan === "premium"
+      ? "LIVEINF-PREMIUM"
+      : plan === "pro"
+        ? "LIVEINF-PRO"
+        : "LIVEINF-BASIC";
   return `${prefix}-${random.slice(0,5)}-${random.slice(5,10)}-${random.slice(10,15)}-${random.slice(15,20)}`;
 }
 
@@ -121,7 +294,10 @@ function rowToLicense(row) {
     note: row.note || "",
     amountPaid: Number(row.amount_paid || 0),
     paymentMethod: row.payment_method || "",
-    lastValidationAt: toIso(row.last_validation_at)
+    lastValidationAt: toIso(row.last_validation_at),
+    planName: planDefinition(row.plan).name,
+    monthlyPrice: planDefinition(row.plan).monthlyPrice,
+    keyLimit: planDefinition(row.plan).keyLimit
   };
 }
 
@@ -202,6 +378,82 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
   try {
+
+    if (url.pathname === "/api/webhooks/cakto" && request.method === "POST") {
+      const body = await readBody(request);
+      const suppliedSecret = caktoSecretFromRequest(request, url, body);
+
+      if (
+        !CAKTO_WEBHOOK_SECRET ||
+        !suppliedSecret ||
+        !safeEqual(suppliedSecret, CAKTO_WEBHOOK_SECRET)
+      ) {
+        json(response, 401, {
+          ok: false,
+          error: "Webhook Cakto não autorizado."
+        });
+        return;
+      }
+
+      const event = caktoEventData(body);
+      const plan = findPlanInPayload(body);
+
+      try {
+        await pool.execute(
+          `INSERT INTO cakto_webhook_events (
+             event_id,event_type,offer_id,order_id,customer_email,
+             payment_status,mapped_plan,payload
+           ) VALUES (?,?,?,?,?,?,?,?)
+           ON DUPLICATE KEY UPDATE event_id=event_id`,
+          [
+            event.eventId,
+            event.eventType || null,
+            event.offerId || null,
+            event.orderId || null,
+            event.email || null,
+            event.paymentStatus || null,
+            plan || null,
+            JSON.stringify(body)
+          ]
+        );
+      } catch (error) {
+        if (error.code === "ER_NO_SUCH_TABLE") {
+          json(response, 503, {
+            ok: false,
+            error: "Execute npm run db:migrate-cakto antes de receber webhooks."
+          });
+          return;
+        }
+        throw error;
+      }
+
+      if (CAKTO_CAPTURE_ONLY) {
+        await pool.execute(
+          `UPDATE cakto_webhook_events
+           SET processed=0,
+               processing_error='CAPTURE_ONLY: aguardando validação do payload real'
+           WHERE event_id=?`,
+          [event.eventId]
+        );
+
+        json(response, 200, {
+          ok: true,
+          received: true,
+          captureOnly: true,
+          mappedPlan: plan || null,
+          message: "Evento salvo. Nenhuma licença foi criada automaticamente."
+        });
+        return;
+      }
+
+      json(response, 200, {
+        ok: true,
+        received: true,
+        mappedPlan: plan || null
+      });
+      return;
+    }
+
     if (url.pathname === "/api/health" && request.method === "GET") {
       await pool.query("SELECT 1");
       json(response, 200, {
@@ -311,11 +563,96 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+
+    if (url.pathname === "/api/plans" && request.method === "GET") {
+      json(response, 200, {
+        ok: true,
+        plans: Object.values(PLAN_CATALOG)
+      });
+      return;
+    }
+
     if (url.pathname.startsWith("/api/admin/")) {
       if (!adminAuthorized(request)) {
         json(response, 401, {
           ok: false,
           error: "Acesso administrativo negado."
+        });
+        return;
+      }
+
+
+      if (url.pathname === "/api/admin/accounts" && request.method === "GET") {
+        const [rows] = await pool.query(
+          `SELECT
+             a.email,
+             a.plan,
+             a.monthly_price,
+             a.key_limit,
+             a.subscription_status,
+             a.cakto_customer_id,
+             a.cakto_subscription_id,
+             a.current_period_end,
+             a.created_at,
+             a.updated_at,
+             COUNT(l.id) AS keys_created,
+             SUM(CASE WHEN l.active=1 THEN 1 ELSE 0 END) AS keys_active
+           FROM customer_accounts a
+           LEFT JOIN licenses l ON l.email=a.email
+           GROUP BY a.email
+           ORDER BY a.created_at DESC`
+        );
+
+        json(response, 200, {
+          ok: true,
+          accounts: rows.map(row => ({
+            email: row.email,
+            plan: row.plan,
+            planName: planDefinition(row.plan).name,
+            monthlyPrice: Number(row.monthly_price),
+            keyLimit: row.key_limit === null ? null : Number(row.key_limit),
+            subscriptionStatus: row.subscription_status,
+            caktoCustomerId: row.cakto_customer_id,
+            caktoSubscriptionId: row.cakto_subscription_id,
+            currentPeriodEnd: toIso(row.current_period_end),
+            keysCreated: Number(row.keys_created || 0),
+            keysActive: Number(row.keys_active || 0),
+            createdAt: toIso(row.created_at),
+            updatedAt: toIso(row.updated_at)
+          }))
+        });
+        return;
+      }
+
+
+      if (url.pathname === "/api/admin/cakto-events" && request.method === "GET") {
+        const [rows] = await pool.query(
+          `SELECT event_id,event_type,offer_id,order_id,customer_email,
+                  payment_status,mapped_plan,processed,processing_error,
+                  received_at,processed_at,payload
+           FROM cakto_webhook_events
+           ORDER BY received_at DESC
+           LIMIT 100`
+        );
+
+        json(response, 200, {
+          ok: true,
+          events: rows.map(row => ({
+            eventId: row.event_id,
+            eventType: row.event_type,
+            offerId: row.offer_id,
+            orderId: row.order_id,
+            customerEmail: row.customer_email,
+            paymentStatus: row.payment_status,
+            mappedPlan: row.mapped_plan,
+            processed: Boolean(row.processed),
+            processingError: row.processing_error,
+            receivedAt: toIso(row.received_at),
+            processedAt: toIso(row.processed_at),
+            payload: typeof row.payload === "string"
+              ? JSON.parse(row.payload)
+              : row.payload
+          }))
         });
         return;
       }
@@ -335,7 +672,7 @@ const server = http.createServer(async (request, response) => {
         const body = await readBody(request);
         const email = normalizeEmail(body.email);
         const durationDays = Number(body.durationDays);
-        const plan = body.plan === "pro" ? "pro" : "basic";
+        const plan = normalizePlan(body.plan);
         const note = String(body.note || "").trim();
         const amountPaid = Math.max(0, Number(body.amountPaid || 0));
         const paymentMethod = String(body.paymentMethod || "").trim();
@@ -348,6 +685,22 @@ const server = http.createServer(async (request, response) => {
           json(response, 400, {
             ok: false,
             error: "Os dias devem estar entre 1 e 36500."
+          });
+          return;
+        }
+
+        const accountPlan = await upsertCustomerAccount(email, plan);
+        const usedKeys = await accountKeyUsage(email);
+
+        if (
+          accountPlan.keyLimit !== null &&
+          usedKeys >= accountPlan.keyLimit
+        ) {
+          json(response, 409, {
+            ok: false,
+            error:
+              `O plano ${accountPlan.name} permite ${accountPlan.keyLimit} ` +
+              `${accountPlan.keyLimit === 1 ? "chave" : "chaves"} por conta.`
           });
           return;
         }
@@ -480,8 +833,10 @@ const server = http.createServer(async (request, response) => {
 
         if (!action && request.method === "PATCH") {
           const body = await readBody(request);
-          const plan = body.plan === "pro" ? "pro" :
-            body.plan === "basic" ? "basic" : null;
+          const plan =
+            body.plan !== undefined
+              ? normalizePlan(body.plan)
+              : null;
 
           await pool.execute(
             `UPDATE licenses SET
@@ -498,6 +853,14 @@ const server = http.createServer(async (request, response) => {
               id
             ]
           );
+
+          if (plan) {
+            await upsertCustomerAccount(row.email, plan);
+            await pool.execute(
+              "UPDATE licenses SET plan=? WHERE email=?",
+              [plan, row.email]
+            );
+          }
 
           const [updatedRows] = await pool.execute(
             "SELECT * FROM licenses WHERE id=? LIMIT 1",

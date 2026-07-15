@@ -1,0 +1,19 @@
+LIVE INFINITY v2.1.0 — PLANOS E LIMITES DE CHAVES
+
+PLANOS
+- Básico: R$ 97/mês, limite de 1 chave.
+- PRO: R$ 147/mês, limite de 2 chaves.
+- Premium: R$ 197/mês, chaves ilimitadas.
+- Cada chave continua vinculada a somente um computador.
+
+PAINEL ADMIN
+- Cards dos três planos.
+- Criação de licença com Básico, PRO ou Premium.
+- Página Usuários mostra conta, mensalidade, chaves utilizadas e limite.
+- Alteração manual de plano.
+- Bloqueio automático ao tentar ultrapassar o limite do plano.
+
+BANCO
+- Nova tabela customer_accounts, preparada para a Cakto.
+- Campos de assinatura, IDs da Cakto e fim do período.
+- Migração automática das contas existentes.

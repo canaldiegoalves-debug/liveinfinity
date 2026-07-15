@@ -22,7 +22,9 @@ const elements = {
 const state = {
   token: sessionStorage.getItem("liveInfinityAdminSession") || "",
   licenses: [],
+  accounts: [],
   tickets: [],
+  caktoEvents: [],
   page: "dashboard",
   loading: false,
   refreshTimer: null,
@@ -42,6 +44,39 @@ async function api(path, options = {}) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || "Falha na requisição.");
   return body;
+}
+
+
+const PLAN_META = {
+  basic: {
+    name: "Básico",
+    price: 97,
+    keyLimit: 1,
+    description: "1 chave para 1 computador"
+  },
+  pro: {
+    name: "PRO",
+    price: 147,
+    keyLimit: 2,
+    description: "2 chaves, uma para cada computador"
+  },
+  premium: {
+    name: "Premium",
+    price: 197,
+    keyLimit: null,
+    description: "Chaves ilimitadas, uma por computador"
+  }
+};
+
+function planMeta(plan) {
+  return PLAN_META[plan] || PLAN_META.basic;
+}
+
+function keyLimitText(plan) {
+  const meta = planMeta(plan);
+  return meta.keyLimit === null
+    ? "Ilimitadas"
+    : String(meta.keyLimit);
 }
 
 function money(value) {
@@ -90,13 +125,17 @@ async function loadData({ silent = false, render = true } = {}) {
   state.loading = true;
 
   try {
-    const [licenses, tickets] = await Promise.all([
+    const [licenses, accounts, tickets, caktoEvents] = await Promise.all([
       api("/api/admin/licenses"),
-      api("/api/admin/support")
+      api("/api/admin/accounts"),
+      api("/api/admin/support"),
+      api("/api/admin/cakto-events")
     ]);
 
     state.licenses = licenses.licenses || [];
+    state.accounts = accounts.accounts || [];
     state.tickets = tickets.tickets || [];
+    state.caktoEvents = caktoEvents.events || [];
     elements.lastUpdate.textContent =
       `Atualizado às ${new Date().toLocaleTimeString("pt-BR")}`;
 
@@ -187,7 +226,7 @@ function dashboardPage() {
 
     <article class="card">
       <div class="card-head"><div><small>ATIVIDADE</small><h2>Últimos clientes</h2></div></div>
-      ${usersTable(state.licenses.slice(0, 7))}
+      ${usersTable(state.accounts.slice(0, 7))}
     </article>`;
 }
 
@@ -196,7 +235,7 @@ function licenseCard(license) {
   const status = statusOf(license);
 
   node.querySelector(".license-plan").textContent =
-    license.plan === "pro" ? "PLANO PRO" : "PLANO BÁSICO";
+    `PLANO ${planMeta(license.plan).name.toUpperCase()}`;
   node.querySelector(".license-email").textContent = license.email;
   node.querySelector(".license-key").textContent = license.key;
 
@@ -221,10 +260,19 @@ function licenseCard(license) {
   };
 
   node.querySelector('[data-action="edit"]').onclick = async () => {
-    const planInput = prompt("Plano: digite PRO ou BASICO", license.plan === "pro" ? "PRO" : "BASICO");
+    const planInput = prompt(
+      "Plano: digite BASICO, PRO ou PREMIUM",
+      planMeta(license.plan).name.toUpperCase()
+    );
     if (!planInput) return;
 
-    const plan = planInput.trim().toLowerCase() === "pro" ? "pro" : "basic";
+    const normalizedPlan = planInput.trim().toLowerCase();
+    const plan =
+      normalizedPlan === "premium"
+        ? "premium"
+        : normalizedPlan === "pro"
+          ? "pro"
+          : "basic";
     const amountPaid = Number(prompt("Valor pago:", license.amountPaid || 0));
     const paymentMethod = prompt("Forma de pagamento:", license.paymentMethod || "Pix");
     const note = prompt("Observação:", license.note || "");
@@ -273,11 +321,26 @@ function licensesPage() {
   pageMeta("Licenças", "GESTÃO DE ACESSOS");
 
   elements.content.innerHTML = `
+    <section class="plan-cards">
+      ${Object.entries(PLAN_META).map(([code, plan]) => `
+        <article class="plan-card ${code}">
+          <small>PLANO ${plan.name.toUpperCase()}</small>
+          <strong>${money(plan.price)}<span>/mês</span></strong>
+          <p>${plan.description}</p>
+          <div>Limite de chaves: <b>${plan.keyLimit === null ? "Ilimitadas" : plan.keyLimit}</b></div>
+        </article>
+      `).join("")}
+    </section>
+
     <article class="card">
       <div class="card-head"><div><small>NOVA LICENÇA</small><h2>Gerar chave de acesso</h2></div></div>
       <div class="form-grid">
         <input id="new-email" type="email" placeholder="E-mail do cliente">
-        <select id="new-plan"><option value="basic">Básico</option><option value="pro">Pro</option></select>
+        <select id="new-plan">
+          <option value="basic">Básico — R$ 97/mês — 1 chave</option>
+          <option value="pro">PRO — R$ 147/mês — 2 chaves</option>
+          <option value="premium">Premium — R$ 197/mês — chaves ilimitadas</option>
+        </select>
         <input id="new-days" type="number" min="1" value="30" placeholder="Dias">
         <input id="new-amount" type="number" min="0" step="0.01" placeholder="Valor pago">
         <select id="new-payment"><option>Pix</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option><option>Outro</option></select>
@@ -351,17 +414,29 @@ function licensesPage() {
   };
 }
 
-function usersTable(licenses) {
-  if (!licenses.length) return '<div class="empty">Nenhum usuário cadastrado.</div>';
+function usersTable(accounts) {
+  if (!accounts.length) {
+    return '<div class="empty">Nenhuma conta cadastrada.</div>';
+  }
 
   return `<table class="table">
-    <thead><tr><th>Usuário</th><th>Plano</th><th>Status</th><th>Dispositivo</th><th>Última conexão</th></tr></thead>
-    <tbody>${licenses.map(l => `<tr>
-      <td>${l.email}</td>
-      <td>${l.plan.toUpperCase()}</td>
-      <td><i class="${isOnline(l) ? "online-dot" : "online-dot offline-dot"}"></i>${isOnline(l) ? "Online" : statusText(statusOf(l))}</td>
-      <td>${l.deviceId ? "Vinculado" : "Livre"}</td>
-      <td>${date(l.lastValidationAt)}</td>
+    <thead>
+      <tr>
+        <th>Cliente</th>
+        <th>Plano</th>
+        <th>Mensalidade</th>
+        <th>Chaves utilizadas</th>
+        <th>Limite</th>
+        <th>Assinatura</th>
+      </tr>
+    </thead>
+    <tbody>${accounts.map(account => `<tr>
+      <td>${account.email}</td>
+      <td>${planMeta(account.plan).name}</td>
+      <td>${money(account.monthlyPrice)}</td>
+      <td>${account.keysActive}</td>
+      <td>${account.keyLimit === null ? "Ilimitadas" : account.keyLimit}</td>
+      <td>${account.subscriptionStatus}</td>
     </tr>`).join("")}</tbody>
   </table>`;
 }
@@ -372,7 +447,7 @@ function usersPage() {
     ${statsHtml()}
     <article class="card">
       <div class="card-head"><div><small>USUÁRIOS</small><h2>Presença e dispositivos</h2></div></div>
-      ${usersTable(state.licenses)}
+      ${usersTable(state.accounts)}
     </article>`;
 }
 
@@ -515,6 +590,63 @@ function supportPage() {
   };
 }
 
+
+function caktoPage() {
+  pageMeta("Cakto", "EVENTOS E INTEGRAÇÃO");
+
+  elements.content.innerHTML = `
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <small>MODO SEGURO</small>
+          <h2>Captura de webhooks</h2>
+        </div>
+      </div>
+      <p class="helper">
+        Os eventos são salvos, mas nenhuma licença é criada automaticamente
+        enquanto CAKTO_CAPTURE_ONLY=true.
+      </p>
+      <p class="helper">
+        Básico: 3477jz3_976117 · PRO: 387ye5s_982831 · Premium: 3b3y7bp_982839
+      </p>
+    </article>
+
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <small>ÚLTIMOS EVENTOS</small>
+          <h2>Webhooks recebidos</h2>
+        </div>
+      </div>
+
+      ${state.caktoEvents.length
+        ? `<table class="table">
+            <thead>
+              <tr>
+                <th>Recebido</th>
+                <th>Evento</th>
+                <th>E-mail</th>
+                <th>Plano detectado</th>
+                <th>Status</th>
+                <th>Processamento</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${state.caktoEvents.map(event => `<tr>
+                <td>${date(event.receivedAt)}</td>
+                <td>${event.eventType || "—"}</td>
+                <td>${event.customerEmail || "—"}</td>
+                <td>${event.mappedPlan || "Não identificado"}</td>
+                <td>${event.paymentStatus || "—"}</td>
+                <td>${event.processed ? "Processado" : (event.processingError || "Capturado")}</td>
+              </tr>`).join("")}
+            </tbody>
+          </table>`
+        : '<div class="empty">Nenhum webhook recebido ainda.</div>'}
+    </article>
+  `;
+}
+
 function renderPage() {
   if (!elements.content) return;
 
@@ -524,7 +656,8 @@ function renderPage() {
     users: usersPage,
     finance: financePage,
     reports: reportsPage,
-    support: supportPage
+    support: supportPage,
+    cakto: caktoPage
   };
 
   (pages[state.page] || dashboardPage)();
