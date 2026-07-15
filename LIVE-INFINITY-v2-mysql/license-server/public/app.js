@@ -585,11 +585,11 @@ function usersTable(accounts) {
 }
 
 function usersPage() {
-  pageMeta("Usuários", "CLIENTES E DISPOSITIVOS");
+  pageMeta("Clientes", "CONTAS E CHAVES");
   elements.content.innerHTML = `
     ${statsHtml()}
     <article class="card">
-      <div class="card-head"><div><small>USUÁRIOS</small><h2>Presença e dispositivos</h2></div></div>
+      <div class="card-head"><div><small>CLIENTES</small><h2>Contas e chaves de acesso</h2></div></div>
       ${usersTable(state.accounts)}
     </article>
     ${newKeyModalHtml()}`;

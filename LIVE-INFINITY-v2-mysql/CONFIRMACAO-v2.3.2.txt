@@ -1,0 +1,10 @@
+VERSÃO 2.3.2 CONFIRMADA
+
+Este arquivo foi criado diretamente sobre o ZIP enviado pelo usuário.
+
+Confirmado:
+- Modal de Nova chave presente.
+- Botão Mudar plano presente.
+- Chaves agrupadas por cliente presentes.
+- Backend de mudança de plano presente.
+- Sintaxe validada.
