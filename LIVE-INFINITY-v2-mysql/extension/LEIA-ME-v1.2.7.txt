@@ -1,0 +1,7 @@
+LIVE INFINITY v1.2.7
+
+Bloqueio total de cupom:
+- Cupom, voucher, desconto, código promocional e oferta relâmpago são proibidos.
+- Não existe fallback para cupom.
+- Há validação antes da seleção e outra imediatamente antes do clique.
+- Apenas o produto principal autorizado pode ser fixado.

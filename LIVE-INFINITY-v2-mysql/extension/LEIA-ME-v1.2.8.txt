@@ -1,0 +1,7 @@
+LIVE INFINITY v1.2.8
+
+- Comentários escolhidos aleatoriamente.
+- Não repete o mesmo comentário duas vezes seguidas.
+- Cada venda dispara apenas um agradecimento.
+- Atualização da tela não repete a mesma venda.
+- Sem nome real, não envia mensagem Cliente 1.

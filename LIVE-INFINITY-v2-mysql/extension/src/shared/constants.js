@@ -38,6 +38,9 @@ window.ORION = {
     protectionNotify: true,
     protectionCooldownSeconds: 120,
     endTimerMinutes: 240,
-    endTimerAt: null
+    endTimerAt: null,
+    endTimerPaused: false,
+    endTimerRemainingMs: null,
+    endTimerStartedAt: null
   }
 };

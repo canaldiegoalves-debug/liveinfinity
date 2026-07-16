@@ -1,0 +1,9 @@
+LIVE INFINITY v1.3.1
+
+- Timer redesenhado em um único card.
+- Contador grande e status Ativo, Pausado ou Inativo.
+- Durações rápidas de 1h, 2h, 4h, 6h e 8h.
+- Campo manual em minutos.
+- Botão Pausar/Continuar.
+- Botão Cancelar.
+- Encerramento automático permanece integrado ao mesmo timer.

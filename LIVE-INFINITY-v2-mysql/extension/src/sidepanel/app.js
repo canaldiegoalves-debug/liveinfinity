@@ -6,7 +6,7 @@ const state={
   settings:{...ORION.DEFAULTS},
   collapse:{},
   live:{dashboardDetected:false,live:false,elapsedSeconds:0,viewers:null,sales:0,gmv:null,product:null,saleEvents:[],chatMessages:[],violation:null,protectionStatus:"idle",lastScanAt:null},
-  commentTimer:null,endAt:null,endTimer:null,audio:null,audioFiles:[],videoFiles:[],audioIndex:0,ambientContext:null,ambientNodes:[],ambientTimers:[],protectionEvents:[],pendingRender:false,licenseError:""
+  commentTimer:null,endAt:null,endTimer:null,timerPaused:false,timerRemainingMs:null,audio:null,audioFiles:[],videoFiles:[],audioIndex:0,ambientContext:null,ambientNodes:[],ambientTimers:[],protectionEvents:[],pendingRender:false,licenseError:""
 };
 
 async function ensureDeviceId(){
@@ -84,8 +84,10 @@ async function load(){
     ...(data[ORION.STORAGE.SETTINGS]||{})
   };
   state.endAt=Number(state.settings.endTimerAt||0)||null;
-  if(state.endAt&&state.endAt>Date.now())startTicker();
-  if(state.endAt&&state.endAt<=Date.now())state.endAt=null;
+  state.timerPaused=Boolean(state.settings.endTimerPaused);
+  state.timerRemainingMs=Number(state.settings.endTimerRemainingMs||0)||null;
+  if(state.endAt&&!state.timerPaused&&state.endAt>Date.now())startTicker();
+  if(state.endAt&&!state.timerPaused&&state.endAt<=Date.now())state.endAt=null;
   state.collapse=data[ORION.STORAGE.COLLAPSE]||{};
 
   if(state.license){
@@ -108,6 +110,45 @@ async function saveSettings(){await chrome.storage.local.set({[ORION.STORAGE.SET
 async function saveCollapse(){await chrome.storage.local.set({[ORION.STORAGE.COLLAPSE]:state.collapse})}
 function valid(){return !!(state.license?.active&&new Date(state.license.expiresAt)>new Date())}
 function pro(){return state.license?.plan==="pro"}
+
+  document.getElementById("download-cash-sound")?.addEventListener("click", async () => {
+    try {
+      const url = chrome.runtime.getURL("assets/caixa-registradora-live-infinity.wav");
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = "caixa-registradora-live-infinity.wav";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+
+      const status = document.getElementById("cash-sound-status");
+      if (status) status.textContent = "Som baixado com sucesso.";
+    } catch (error) {
+      const status = document.getElementById("cash-sound-status");
+      if (status) status.textContent = "Não foi possível baixar o som.";
+    }
+  });
+
+  document.getElementById("test-cash-sound")?.addEventListener("click", async () => {
+    try {
+      const audio = new Audio(
+        chrome.runtime.getURL("assets/caixa-registradora-live-infinity.wav")
+      );
+      await audio.play();
+
+      const status = document.getElementById("cash-sound-status");
+      if (status) status.textContent = "Reproduzindo som de teste.";
+    } catch (error) {
+      const status = document.getElementById("cash-sound-status");
+      if (status) status.textContent = "O navegador bloqueou a reprodução do som.";
+    }
+  });
+
+
 function fmt(s){s=Math.max(0,+s||0);return`${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}:${String(Math.floor(s%60)).padStart(2,"0")}`}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
 async function post(type,payload={}){
@@ -213,7 +254,7 @@ function updateLiveFields(){
   setText('[data-live-value="viewers"]',state.live.viewers??"—");
   setText('[data-live-value="status"]',state.live.live?"ATIVA":"INATIVA");
   setText('[data-live-value="elapsed"]',fmt(state.live.elapsedSeconds));
-  setText('[data-live-value="gmv"]',state.live.gmv?`R$ ${state.live.gmv}`:"—");
+  setText('[data-live-value="gmv"]',state.live.gmv!==null&&state.live.gmv!==undefined?`R$ ${Number(state.live.gmv).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—");
 
   const product=document.querySelector('[data-live-value="product"]');
   if(product)product.textContent=state.live.product||"não localizado";
@@ -314,13 +355,61 @@ function home(){
     <div class="actions"><button id="scan" class="btn-secondary">Escanear agora</button></div>
   `)}
 
-  ${section("timer","⏱️","Timer de Encerramento","encerra no horário definido",`
-    <div class="timer-display"><strong id="remaining">${fmt(timerRemaining)}</strong><small>Tempo restante</small></div>
-    <div class="quick-times">
-      <button data-time="60">1h</button><button data-time="120">2h</button><button data-time="240" class="active">4h</button><button data-time="360">6h</button><button data-time="480">8h</button>
+  ${section("timer","⏱️","Timer de Encerramento","encerra a live automaticamente",`
+    <div class="timer-header-line">
+      <p class="helper timer-description">Encerra a live automaticamente no horário definido.</p>
+      <span id="timer-badge" class="timer-badge ${state.timerPaused?"paused":state.endAt?"active":"inactive"}">
+        ${state.timerPaused?"Pausado":state.endAt?"Ativo":"Inativo"}
+      </span>
     </div>
-    <label>Ou digite manualmente</label><input id="timer-minutes" type="number" value="${state.settings.endTimerMinutes}">
-    <div class="actions"><button id="timer-start" class="${state.endAt?"btn-danger":"btn-primary"}">${state.endAt?"■ Cancelar timer":"▶ Iniciar ciclo"}</button></div><p id="timer-status" class="helper">${state.endAt?"Timer ativo. A LIVE será encerrada automaticamente.":"Timer parado."}</p>
+
+    <div class="timer-panel">
+      <span class="timer-kicker">TEMPO RESTANTE</span>
+      <strong id="remaining" class="timer-clock">${fmt(timerRemaining)}</strong>
+      <small id="timer-started-label">
+        ${state.settings.endTimerStartedAt
+          ? `Iniciado: ${new Date(state.settings.endTimerStartedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}`
+          : "Iniciado: —"}
+      </small>
+    </div>
+
+    <label class="timer-label">DURAÇÃO DA LIVE</label>
+    <div class="quick-times timer-quick-times">
+      <button data-time="60">1h</button>
+      <button data-time="120">2h</button>
+      <button data-time="240">4h</button>
+      <button data-time="360">6h</button>
+      <button data-time="480">8h</button>
+    </div>
+
+    <div class="timer-manual-row">
+      <label for="timer-minutes">Ou digite manualmente</label>
+      <div class="timer-input-wrap">
+        <input id="timer-minutes" type="number" min="1" value="${state.settings.endTimerMinutes}">
+        <span>min</span>
+      </div>
+    </div>
+
+    <div class="timer-secondary-actions">
+      <button id="timer-pause" class="timer-pause-button" type="button" ${!state.endAt&&!state.timerPaused?"disabled":""}>
+        ${state.timerPaused?"▶ Continuar Timer":"Ⅱ Pausar Timer"}
+      </button>
+      <button id="timer-cancel" class="timer-cancel-button" type="button" ${!state.endAt&&!state.timerPaused?"disabled":""}>
+        ■ Cancelar
+      </button>
+    </div>
+
+    <button id="timer-start" class="timer-start-button" type="button" ${state.endAt||state.timerPaused?"disabled":""}>
+      ▶ Iniciar ciclo
+    </button>
+
+    <p id="timer-status" class="helper timer-status">
+      ${state.timerPaused
+        ? "Timer pausado. A contagem continuará do ponto atual."
+        : state.endAt
+          ? "Timer ativo. A LIVE será encerrada automaticamente."
+          : "Defina a duração e inicie o ciclo."}
+    </p>
   `)}
 
   ${section("product","📌","Fixação de Produto","controle rápido do produto atual",`
@@ -333,7 +422,7 @@ function home(){
   `)}
 
   ${section("sales","🛒","Contador de Vendas","eventos da sessão atual",`
-    <div class="card-row"><div class="mini-card"><span>Vendas</span><strong data-live-value="sales">${state.live.sales}</strong></div><div class="mini-card"><span>GMV</span><strong data-live-value="gmv">${state.live.gmv?`R$ ${state.live.gmv}`:"—"}</strong></div></div>
+    <div class="card-row"><div class="mini-card"><span>Vendas</span><strong data-live-value="sales">${state.live.sales}</strong></div><div class="mini-card"><span>GMV</span><strong data-live-value="gmv">${state.live.gmv!==null&&state.live.gmv!==undefined?`R$ ${Number(state.live.gmv).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"}</strong></div></div>
     <div class="event-list">${(state.live.saleEvents||[]).slice(-8).reverse().map(e=>`<p>🛒 ${esc(e.text)}</p>`).join("")||"<p>Nenhuma venda detectada.</p>"}</div>
   `)}
 
@@ -344,7 +433,47 @@ function home(){
     <p id="post-status" class="helper">${state.settings.postSaleEnabled?"Agradecimento automático ATIVO.":"Agradecimento automático DESATIVADO."}</p>
   `,false)}
 
-  ${section("protection","🛡️","Proteção contra Violação","encerra a LIVE ao detectar aviso crítico",`
+  
+    <details class="telegram-tutorial">
+      <summary>📖 Como configurar o Telegram</summary>
+
+      <div class="tutorial-content">
+        <p><strong>1. Crie seu bot</strong></p>
+        <p>Abra o Telegram, procure por <code>@BotFather</code> e envie <code>/newbot</code>.</p>
+        <p>Escolha o nome do bot e copie o Token fornecido.</p>
+
+        <p><strong>2. Descubra seu Chat ID</strong></p>
+        <p>Procure por <code>@userinfobot</code>, clique em Start e copie o número exibido em Chat ID.</p>
+
+        <p><strong>3. Inicie uma conversa com o bot</strong></p>
+        <p>Abra o bot que você criou e envie uma mensagem, como <code>Olá</code>. Sem isso, o Telegram pode bloquear o primeiro envio.</p>
+
+        <p><strong>4. Preencha os campos</strong></p>
+        <p>Cole o Token do Bot e o Chat ID nos campos acima, ative as notificações e clique em testar.</p>
+
+        <p><strong>5. Som de caixa registradora</strong></p>
+        <p>Baixe o som abaixo e use como toque de notificação no Telegram ou no computador.</p>
+
+        <div class="actions">
+          <button id="download-cash-sound" class="btn-secondary" type="button">
+            🔊 Baixar som de caixa registradora
+          </button>
+          <button id="test-cash-sound" class="btn-secondary" type="button">
+            ▶ Ouvir som
+          </button>
+        </div>
+
+        <p id="cash-sound-status" class="helper"></p>
+
+        <p class="helper">
+          No Telegram, abra a conversa do bot, acesse as notificações da conversa
+          e selecione o arquivo baixado como som personalizado quando o sistema permitir.
+          Em alguns aparelhos, primeiro é necessário salvar o áudio nos arquivos do dispositivo.
+        </p>
+      </div>
+    </details>
+
+    ${section("protection","🛡️","Proteção contra Violação","encerra a LIVE ao detectar aviso crítico",`
     <div class="toggle-line"><span>Proteção automática</span><input id="protection-enabled" class="toggle" type="checkbox" ${state.settings.protectionEnabled?"checked":""}></div>
     <p class="helper">A detecção exige termos fortes como violação, diretrizes, advertência ou penalidade combinados com risco para a transmissão.</p>
     <div class="protection-status ${state.live.violation?"danger":state.settings.protectionEnabled?"armed":""}">
@@ -458,25 +587,73 @@ function bind(){
   document.getElementById("scan")?.addEventListener("click",()=>post("ORION_FORCE_SCAN"));
   document.querySelectorAll("[data-time]").forEach(b=>b.onclick=()=>{document.getElementById("timer-minutes").value=b.dataset.time;document.querySelectorAll("[data-time]").forEach(x=>x.classList.remove("active"));b.classList.add("active")});
   document.getElementById("timer-start")?.addEventListener("click",async()=>{
-    if(state.endAt){
-      state.endAt=null;
-      state.settings.endTimerAt=null;
-      clearInterval(state.endTimer);
-      state.endTimer=null;
-      await saveSettings();
-      render();
-      return;
-    }
+    const minutes=Math.max(1,+document.getElementById("timer-minutes").value||1);
+    const startedAt=Date.now();
 
-    const m=Math.max(1,+document.getElementById("timer-minutes").value||1);
-    state.settings.endTimerMinutes=m;
-    state.endAt=Date.now()+m*60000;
+    state.settings.endTimerMinutes=minutes;
+    state.settings.endTimerStartedAt=startedAt;
+    state.settings.endTimerPaused=false;
+    state.settings.endTimerRemainingMs=null;
+
+    state.timerPaused=false;
+    state.timerRemainingMs=null;
+    state.endAt=startedAt+minutes*60000;
     state.settings.endTimerAt=state.endAt;
+
     await saveSettings();
     startTicker();
     render();
   });
-  document.getElementById("pin")?.addEventListener("click",async()=>{await post("ORION_PIN_PRODUCT",{skipCoupons:state.settings.skipCoupons!==false});const m=document.getElementById("pin-msg");if(m)m.textContent="Procurando produto principal e ignorando cupons."});
+
+  document.getElementById("timer-pause")?.addEventListener("click",async()=>{
+    if(state.timerPaused){
+      const remaining=Math.max(1000,Number(state.timerRemainingMs||state.settings.endTimerRemainingMs||1000));
+      state.timerPaused=false;
+      state.settings.endTimerPaused=false;
+      state.timerRemainingMs=null;
+      state.settings.endTimerRemainingMs=null;
+      state.endAt=Date.now()+remaining;
+      state.settings.endTimerAt=state.endAt;
+
+      await saveSettings();
+      startTicker();
+      render();
+      return;
+    }
+
+    if(!state.endAt)return;
+
+    const remaining=Math.max(1000,state.endAt-Date.now());
+    clearInterval(state.endTimer);
+    state.endTimer=null;
+    state.timerPaused=true;
+    state.settings.endTimerPaused=true;
+    state.timerRemainingMs=remaining;
+    state.settings.endTimerRemainingMs=remaining;
+    state.endAt=null;
+    state.settings.endTimerAt=null;
+
+    await saveSettings();
+    render();
+  });
+
+  document.getElementById("timer-cancel")?.addEventListener("click",async()=>{
+    clearInterval(state.endTimer);
+    state.endTimer=null;
+    state.endAt=null;
+    state.timerPaused=false;
+    state.timerRemainingMs=null;
+
+    state.settings.endTimerAt=null;
+    state.settings.endTimerPaused=false;
+    state.settings.endTimerRemainingMs=null;
+    state.settings.endTimerStartedAt=null;
+
+    await saveSettings();
+    render();
+  });
+
+    document.getElementById("pin")?.addEventListener("click",async()=>{await post("ORION_PIN_PRODUCT",{skipCoupons:state.settings.skipCoupons!==false});const m=document.getElementById("pin-msg");if(m)m.textContent="Procurando produto principal e ignorando cupons."});
   document.getElementById("unpin")?.addEventListener("click",()=>post("ORION_UNPIN_PRODUCT"));
   document.getElementById("auto-pin")?.addEventListener("change",async e=>{
     state.settings.autoPinEnabled=e.target.checked;
@@ -588,7 +765,36 @@ function bind(){
   });
 }
 function scheduleComment(){clearTimeout(state.commentTimer);if(!state.settings.commentsEnabled||!state.settings.comments.length)return;const min=Math.max(5,state.settings.minCommentDelay),max=Math.max(min,state.settings.maxCommentDelay),delay=(Math.floor(Math.random()*(max-min+1))+min)*1000;state.commentTimer=setTimeout(()=>{post("ORION_SEND_CHAT",{text:state.settings.comments[Math.floor(Math.random()*state.settings.comments.length)]});scheduleComment()},delay)}
-function startTicker(){clearInterval(state.endTimer);state.endTimer=setInterval(()=>{if(!state.endAt)return;const r=Math.max(0,Math.ceil((state.endAt-Date.now())/1000)),el=document.getElementById("remaining");if(el)el.textContent=fmt(r);if(r===0){clearInterval(state.endTimer);state.endTimer=null;state.endAt=null;const msg=document.getElementById("timer-status");if(msg)msg.textContent="Tempo concluído. Encerramento automático solicitado."}},1000)}
+function startTicker(){
+  clearInterval(state.endTimer);
+
+  const update=()=>{
+    if(state.timerPaused)return;
+    if(!state.endAt)return;
+
+    const remaining=Math.max(0,Math.ceil((state.endAt-Date.now())/1000));
+    const clock=document.getElementById("remaining");
+    if(clock)clock.textContent=fmt(remaining);
+
+    if(remaining===0){
+      clearInterval(state.endTimer);
+      state.endTimer=null;
+      state.endAt=null;
+
+      const status=document.getElementById("timer-status");
+      if(status)status.textContent="Tempo concluído. Encerramento automático solicitado.";
+
+      const badge=document.getElementById("timer-badge");
+      if(badge){
+        badge.textContent="Encerrando";
+        badge.className="timer-badge active";
+      }
+    }
+  };
+
+  update();
+  state.endTimer=setInterval(update,1000);
+}
 chrome.runtime.onMessage.addListener((message)=>{
   if(message?.type==="ORION_AUTOMATION_EVENT"){
     const payload=message.payload||{};

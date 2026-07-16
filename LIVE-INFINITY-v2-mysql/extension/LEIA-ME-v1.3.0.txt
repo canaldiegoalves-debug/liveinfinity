@@ -1,0 +1,7 @@
+LIVE INFINITY v1.3.0
+
+- Tutorial completo de configuração do Telegram dentro do painel.
+- Instruções para BotFather, Token, Chat ID e primeira mensagem.
+- Som original de caixa registradora incluído.
+- Botão para baixar o som.
+- Botão para ouvir o som antes de baixar.

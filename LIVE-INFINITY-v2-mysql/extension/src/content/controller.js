@@ -4,6 +4,7 @@ const OrionContentAutomation = {
   settings: { ...ORION.DEFAULTS },
   commentTimer: null,
   commentIndex: 0,
+  lastCommentIndex: -1,
   autoPinTimer: null,
   autoPinBusy: false,
   seenSales: new Set(),
@@ -56,6 +57,7 @@ const OrionContentAutomation = {
 
     // O primeiro comentário também respeita o intervalo definido no painel.
     this.commentIndex = 0;
+    this.lastCommentIndex = -1;
     this.scheduleNextComment();
   },
 
@@ -84,7 +86,18 @@ const OrionContentAutomation = {
       Math.floor(Math.random() * (maximum - minimum + 1)) + minimum;
 
     this.commentTimer = setTimeout(async () => {
-      const message = comments[this.commentIndex % comments.length];
+      let selectedIndex = 0;
+
+      if (comments.length > 1) {
+        do {
+          selectedIndex = Math.floor(Math.random() * comments.length);
+        } while (selectedIndex === this.lastCommentIndex);
+      }
+
+      this.lastCommentIndex = selectedIndex;
+      this.commentIndex += 1;
+
+      const message = comments[selectedIndex];
       let result = await OrionDetector.sendChat(message);
 
       if (!result.ok) {
@@ -103,7 +116,6 @@ const OrionContentAutomation = {
         }
       }).catch(() => {});
 
-      this.commentIndex += 1;
       this.scheduleNextComment();
     }, seconds * 1000);
   },
@@ -179,6 +191,7 @@ const OrionContentAutomation = {
   async handleEndTimer() {
     const endTimerAt = Number(this.settings.endTimerAt || 0);
 
+    if (this.settings.endTimerPaused) return;
     if (!endTimerAt) return;
     if (Date.now() < endTimerAt) return;
     if (this.endTimerBusy) return;
@@ -198,6 +211,12 @@ const OrionContentAutomation = {
       const result = await OrionDetector.endLive({ dryRun: false });
 
       this.settings.endTimerAt = null;
+      this.settings.endTimerPaused = false;
+      this.settings.endTimerRemainingMs = null;
+      this.settings.endTimerStartedAt = null;
+      this.settings.endTimerPaused = false;
+      this.settings.endTimerRemainingMs = null;
+      this.settings.endTimerStartedAt = null;
 
       await chrome.storage.local.set({
         [ORION.STORAGE.SETTINGS]: this.settings
@@ -280,10 +299,42 @@ const OrionContentAutomation = {
     this.previousLiveState = isLive;
   },
 
+
+  normalizeSaleFingerprint(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  },
+
+  saleFingerprint(sale) {
+    const buyer = this.normalizeSaleFingerprint(sale?.buyerName);
+    const text = this.normalizeSaleFingerprint(sale?.text)
+      .replace(/\b(há|a)\s+\d+\s+(segundos?|minutos?)\b/g, "")
+      .replace(/\d{1,2}:\d{2}(?::\d{2})?/g, "")
+      .trim();
+
+    const product = this.normalizeSaleFingerprint(
+      sale?.productName || sale?.product || ""
+    );
+
+    return [buyer, product, text].filter(Boolean).join("|");
+  },
+
   async handleSales() {
     for (const sale of OrionDetector.state.saleEvents || []) {
-      if (this.seenSales.has(sale.id)) continue;
-      this.seenSales.add(sale.id);
+      const fingerprint = this.saleFingerprint(sale);
+      if (!fingerprint) continue;
+      if (this.seenSales.has(fingerprint)) continue;
+
+      this.seenSales.add(fingerprint);
+
+      if (this.seenSales.size > 500) {
+        const oldest = this.seenSales.values().next().value;
+        this.seenSales.delete(oldest);
+      }
 
       if (this.settings.postSaleEnabled) {
         const extractedName =
@@ -300,15 +351,28 @@ const OrionContentAutomation = {
           : extractedName;
 
         const messageTemplate = String(this.settings.postSaleMessage || "");
-        const message = name
-          ? messageTemplate.replace(/\{nome\}/gi, name)
-          : messageTemplate
-              .replace(/(?:Olá|Oi|Parabéns|Obrigado|Obrigada)[, ]*\{nome\}[!,. ]*/gi, "")
-              .replace(/\{nome\}/gi, "")
-              .replace(/\s{2,}/g, " ")
-              .trim();
 
-        if (message.trim()) {
+        // Sem nome real, não envia agradecimento automático.
+        if (!name) {
+          chrome.runtime.sendMessage({
+            type: "ORION_AUTOMATION_EVENT",
+            payload: {
+              kind: "post-sale-skipped-no-real-name",
+              sale,
+              fingerprint,
+              createdAt: new Date().toISOString()
+            }
+          }).catch(() => {});
+
+          continue;
+        }
+
+        const message = messageTemplate
+          .replace(/\{nome\}/gi, name)
+          .replace(/\s{2,}/g, " ")
+          .trim();
+
+        if (message) {
           await OrionDetector.sendChat(message);
         }
       }

@@ -24,7 +24,10 @@ const DEFAULTS = {
   clipMaxSeconds: 12,
   clipPauseSeconds: 1,
   endTimerMinutes: 240,
-  endTimerAt: null
+  endTimerAt: null,
+  endTimerPaused: false,
+  endTimerRemainingMs: null,
+  endTimerStartedAt: null
 };
 
 chrome.runtime.onInstalled.addListener(async () => {

@@ -69,18 +69,42 @@ window.OrionDetector = {
   },
 
   parseNumberNear(text, labels) {
+    const parseLocaleNumber = (raw) => {
+      if (raw == null) return null;
+
+      let value = String(raw)
+        .replace(/[^\d.,-]/g, "")
+        .trim();
+
+      if (!value) return null;
+
+      if (value.includes(",") && value.includes(".")) {
+        if (value.lastIndexOf(",") > value.lastIndexOf(".")) {
+          value = value.replace(/\./g, "").replace(",", ".");
+        } else {
+          value = value.replace(/,/g, "");
+        }
+      } else if (value.includes(",")) {
+        value = value.replace(/\./g, "").replace(",", ".");
+      } else if ((value.match(/\./g) || []).length > 1) {
+        value = value.replace(/\./g, "");
+      }
+
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    };
+
     for (const label of labels) {
       const safe = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const patterns = [
-        new RegExp(`${safe}\\s*[:\\-]?\\s*(\\d[\\d.,]*)`, "i"),
-        new RegExp(`(\\d[\\d.,]*)\\s*${safe}`, "i")
+        new RegExp(`${safe}\\s*[:\\-]?\\s*R?\\$?\\s*([\\d.,]+)`, "i"),
+        new RegExp(`R?\\$?\\s*([\\d.,]+)\\s*${safe}`, "i")
       ];
 
       for (const pattern of patterns) {
         const match = text.match(pattern);
-        if (!match) continue;
-        const value = Number(match[1].replace(/\./g, "").replace(",", "."));
-        if (Number.isFinite(value)) return value;
+        const value = parseLocaleNumber(match?.[1]);
+        if (value !== null) return value;
       }
     }
 
@@ -103,6 +127,70 @@ window.OrionDetector = {
         if (minutes < 60 && seconds < 60) {
           return hours * 3600 + minutes * 60 + seconds;
         }
+      }
+    }
+
+    return null;
+  },
+
+
+  readMetricFromDom(labels) {
+    const parseLocaleNumber = (raw) => {
+      if (raw == null) return null;
+
+      let value = String(raw)
+        .replace(/[^\d.,-]/g, "")
+        .trim();
+
+      if (!value) return null;
+
+      if (value.includes(",") && value.includes(".")) {
+        if (value.lastIndexOf(",") > value.lastIndexOf(".")) {
+          value = value.replace(/\./g, "").replace(",", ".");
+        } else {
+          value = value.replace(/,/g, "");
+        }
+      } else if (value.includes(",")) {
+        value = value.replace(/\./g, "").replace(",", ".");
+      }
+
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    };
+
+    const nodes = [...document.querySelectorAll("body *")];
+
+    for (const node of nodes) {
+      const ownText = this.normalize(
+        [...node.childNodes]
+          .filter((child) => child.nodeType === Node.TEXT_NODE)
+          .map((child) => child.textContent)
+          .join(" ")
+      );
+
+      const matchedLabel = labels.find((label) =>
+        ownText.toLowerCase().includes(label.toLowerCase())
+      );
+
+      if (!matchedLabel) continue;
+
+      const candidates = [
+        node.nextElementSibling,
+        node.parentElement?.querySelector?.(
+          '[class*="value"],[class*="number"],strong,b'
+        ),
+        node.parentElement,
+        node
+      ].filter(Boolean);
+
+      for (const candidate of candidates) {
+        const raw = this.normalize(
+          candidate.innerText || candidate.textContent || ""
+        );
+        const match = raw.match(/R?\$?\s*([\d.,]+)/);
+        const value = parseLocaleNumber(match?.[1]);
+
+        if (value !== null) return value;
       }
     }
 
@@ -206,7 +294,14 @@ window.OrionDetector = {
       if (!text || text.length > 500) continue;
 
       const buyerName = findBuyerName(element, text);
-      const id = `${buyerName}|${text}`.toLowerCase();
+
+      const stableText = text
+        .replace(/\b(há|a)\s+\d+\s+(segundos?|minutos?)\b/gi, "")
+        .replace(/\d{1,2}:\d{2}(?::\d{2})?/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const id = `${buyerName}|${stableText}`.toLowerCase();
 
       if (seen.has(id)) continue;
       seen.add(id);
@@ -241,6 +336,58 @@ window.OrionDetector = {
           !/digite|todos os comentários|relacionados ao produto/i.test(text)
         )
     )].slice(-40);
+  },
+
+
+  isStrictCouponElement(element) {
+    if (!element) return false;
+
+    const text = this.normalize(
+      [
+        element.innerText,
+        element.textContent,
+        element.getAttribute?.("aria-label"),
+        element.getAttribute?.("title"),
+        element.getAttribute?.("data-e2e"),
+        element.getAttribute?.("data-testid"),
+        element.className,
+        element.id
+      ].filter(Boolean).join(" ")
+    );
+
+    const blocked =
+      /cupom|voucher|desconto|código promocional|codigo promocional|promo code|discount|oferta relâmpago|oferta relampago|claim coupon|usar cupom|resgatar cupom|coletar cupom|pegar cupom|aplicar cupom|% off|off\b/i;
+
+    if (blocked.test(text)) return true;
+
+    return Boolean(
+      element.closest?.(
+        '[class*="coupon"],[id*="coupon"],[class*="voucher"],[id*="voucher"],[class*="discount"],[id*="discount"],[data-e2e*="coupon"],[data-testid*="coupon"],[aria-label*="cupom" i],[title*="cupom" i]'
+      )
+    );
+  },
+
+  isAuthorizedMainProductElement(element) {
+    if (!element) return false;
+    if (this.isStrictCouponElement(element)) return false;
+
+    const text = this.normalize(
+      [
+        element.innerText,
+        element.textContent,
+        element.getAttribute?.("aria-label"),
+        element.getAttribute?.("title"),
+        element.className,
+        element.id
+      ].filter(Boolean).join(" ")
+    );
+
+    const container = element.closest?.(
+      '[class*="product"],[id*="product"],[data-e2e*="product"],[data-testid*="product"],[class*="item-card"],[class*="goods"]'
+    );
+
+    return Boolean(container) ||
+      /produto principal|produto fixado|produto em destaque|main product|primary product/i.test(text);
   },
 
   findProduct() {
@@ -670,11 +817,33 @@ window.OrionDetector = {
 
     const events = this.collectSales();
 
-    const metric = this.parseNumberNear(text, [
-      "Itens atribuídos vendidos",
-      "Itens vendidos",
-      "Vendas"
-    ]);
+    const metric =
+      this.readMetricFromDom([
+        "Itens atribuídos vendidos",
+        "Itens vendidos",
+        "Vendas realizadas",
+        "Vendas"
+      ]) ??
+      this.parseNumberNear(text, [
+        "Itens atribuídos vendidos",
+        "Itens vendidos",
+        "Vendas realizadas",
+        "Vendas"
+      ]);
+
+    const gmvMetric =
+      this.readMetricFromDom([
+        "GMV atribuído",
+        "GMV",
+        "Receita",
+        "Valor vendido"
+      ]) ??
+      this.parseNumberNear(text, [
+        "GMV atribuído",
+        "GMV",
+        "Receita",
+        "Valor vendido"
+      ]);
 
     this.state.dashboardDetected = dashboard;
     this.state.live = live;
@@ -686,13 +855,15 @@ window.OrionDetector = {
       "Espectadores"
     ]);
 
-    this.state.sales = Math.max(metric || 0, events.length);
+    this.state.sales = Math.max(
+      Number(metric) || 0,
+      events.length,
+      Number(this.state.sales) || 0
+    );
 
-    this.state.gmv = this.parseNumberNear(text, [
-      "GMV atribuído",
-      "GMV",
-      "Total"
-    ]);
+    if (gmvMetric !== null && gmvMetric !== undefined) {
+      this.state.gmv = Number(gmvMetric);
+    }
 
     this.state.product = this.findProduct();
     this.state.saleEvents = events;
@@ -1143,9 +1314,12 @@ window.OrionDetector = {
       return { button, text, coupon, score };
     });
 
-    const eligible = skipCoupons
-      ? ranked.filter((item) => !item.coupon)
-      : ranked;
+    const eligible = ranked.filter((item) => {
+      const element = item.element || item.button || item.node;
+      if (item.coupon) return false;
+      if (this.isStrictCouponElement(element)) return false;
+      return this.isAuthorizedMainProductElement(element);
+    });
 
     // Regra obrigatória: nunca fixar cupom, voucher ou desconto.
     // Se somente cupons forem encontrados, não clica em nada.
@@ -1153,6 +1327,7 @@ window.OrionDetector = {
       return {
         ok: false,
         error: "Produto principal não localizado. Cupons foram ignorados.",
+        skippedCoupons: true,
         skippedCoupons: true
       };
     }
@@ -1163,6 +1338,19 @@ window.OrionDetector = {
     if (!target) {
       return { ok: false, error: "Produto principal não localizado." };
     }
+
+    const clickTarget = target.element || target.button || target.node || target;
+    if (
+      this.isStrictCouponElement(clickTarget) ||
+      !this.isAuthorizedMainProductElement(clickTarget)
+    ) {
+      return {
+        ok: false,
+        skippedCoupons: this.isStrictCouponElement(clickTarget),
+        error: "Clique bloqueado: somente o produto principal pode ser fixado."
+      };
+    }
+
 
     target.button.click();
 

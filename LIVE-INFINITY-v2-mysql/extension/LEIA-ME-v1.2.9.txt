@@ -1,0 +1,7 @@
+LIVE INFINITY v1.2.9
+
+- Atualização de vendas realizadas em tempo real.
+- Atualização de GMV em tempo real.
+- Leitura direta dos cartões do painel e fallback pelo texto.
+- Suporte a valores como R$ 1.234,56.
+- Mantém o último valor válido durante carregamentos do painel.
