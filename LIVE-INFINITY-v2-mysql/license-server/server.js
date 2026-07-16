@@ -521,16 +521,21 @@ async function logEvent(request, eventType, licenseId = null, email = null, deta
 }
 
 function serveAdminStatic(requestPath, response) {
-  if (
-    requestPath !== ADMIN_PANEL_PATH &&
-    !requestPath.startsWith(`${ADMIN_PANEL_PATH}/`)
-  ) {
+  if (requestPath === ADMIN_PANEL_PATH) {
+    response.writeHead(302, {
+      Location: `${ADMIN_PANEL_PATH}/`,
+      "Cache-Control": "no-store"
+    });
+    response.end();
+    return;
+  }
+
+  if (!requestPath.startsWith(`${ADMIN_PANEL_PATH}/`)) {
     text(response, 404, "Página não encontrada.");
     return;
   }
 
   const relativePath =
-    requestPath === ADMIN_PANEL_PATH ||
     requestPath === `${ADMIN_PANEL_PATH}/`
       ? "/index.html"
       : requestPath.slice(ADMIN_PANEL_PATH.length);

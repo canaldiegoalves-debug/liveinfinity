@@ -1,0 +1,13 @@
+LIVE INFINITY v3.0.1
+
+Correção:
+- Painel Admin redireciona automaticamente para a URL com barra final.
+- CSS, JavaScript e imagens carregam dentro do caminho seguro.
+- Login volta a funcionar.
+- Adicionada tag base relativa como proteção adicional.
+
+URL correta:
+https://admin.valoranegocios.com.br/painel-seguro-liveinfinity/
+
+Servidor: 3.0.1
+Extensão: 3.0.1
