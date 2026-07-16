@@ -44,14 +44,23 @@ chrome.action.onClicked.addListener(async (tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "ORION_TELEGRAM_SEND") {
     const { token, chatId, text } = message.payload || {};
-    if (!token || !chatId || !text) {
+    const cleanToken=String(token||"").trim();
+    const cleanChatId=String(chatId||"").trim();
+    const cleanText=String(text||"").trim();
+
+    if (!cleanToken || !cleanChatId || !cleanText) {
       sendResponse({ ok: false, error: "Configuração incompleta." });
       return;
     }
-    fetch(`https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`, {
+
+    if (!/^\d+:[A-Za-z0-9_-]+$/.test(cleanToken)) {
+      sendResponse({ ok: false, error: "Token do Bot inválido." });
+      return;
+    }
+    fetch(`https://api.telegram.org/bot${cleanToken}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text })
+      body: JSON.stringify({ chat_id: cleanChatId, text: cleanText })
     }).then(async r => {
       const body = await r.json().catch(() => ({}));
       sendResponse({ ok: r.ok, body, error: r.ok ? null : (body.description || "Falha no Telegram.") });

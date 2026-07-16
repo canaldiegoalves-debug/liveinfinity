@@ -137,6 +137,18 @@ window.OrionDetector = {
         warningText: text
       }).catch(console.error);
 
+      let warningAttempts=0;
+      const warningRetry=setInterval(async()=>{
+        warningAttempts+=1;
+        const result=await this.endLive({
+          dryRun:false,
+          reason:"warning"
+        });
+        if(result.ok||warningAttempts>=20){
+          clearInterval(warningRetry);
+        }
+      },500);
+
       return;
     }
   },
@@ -809,8 +821,8 @@ window.OrionDetector = {
       const rect=element.getBoundingClientRect();
       const hasSvg=Boolean(element.querySelector("svg"));
       const iconOnly=!lower||lower.length<=2;
-      const topToolbar=rect.top>=0&&rect.top<130;
-      const farRight=rect.right>viewportWidth*.82;
+      const topToolbar=rect.top>=0&&rect.top<170;
+      const farRight=rect.right>viewportWidth*.78;
       const toolbar=element.closest(
         'header,[class*="header" i],[class*="toolbar" i],[class*="control" i],[class*="live" i]'
       )||element.parentElement;
@@ -1182,6 +1194,7 @@ window.OrionDetector = {
       document.querySelector('textarea[placeholder*="coment" i]') ||
       document.querySelector('textarea[placeholder*="comment" i]') ||
       document.querySelector('textarea[placeholder*="digite" i]') ||
+      document.querySelector('[contenteditable="true"][role="textbox"]') ||
       document.querySelector('[class*="chat" i] textarea') ||
       document.querySelector('[class*="input" i] textarea') ||
       document.querySelector('textarea.arco-textarea') ||
@@ -1191,7 +1204,7 @@ window.OrionDetector = {
       return { ok: false, error: "Campo de comentário não localizado." };
     }
 
-    try {
+    const setValue = () => {
       input.focus();
       input.click();
 
@@ -1200,71 +1213,112 @@ window.OrionDetector = {
           HTMLTextAreaElement.prototype,
           "value"
         )?.set;
-
         if (setter) setter.call(input, message);
         else input.value = message;
-      } else if ("value" in input) {
+      } else if (input.tagName === "INPUT") {
         const setter = Object.getOwnPropertyDescriptor(
           HTMLInputElement.prototype,
           "value"
         )?.set;
-
         if (setter) setter.call(input, message);
         else input.value = message;
       } else {
         input.textContent = message;
       }
 
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-
       try {
-        input.dispatchEvent(new CompositionEvent("compositionstart", {
-          bubbles: true
-        }));
-
-        input.dispatchEvent(new CompositionEvent("compositionend", {
+        input.dispatchEvent(new InputEvent("beforeinput", {
           bubbles: true,
+          cancelable: true,
+          inputType: "insertText",
           data: message
         }));
       } catch {}
 
-      await this.wait(320);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    };
 
-      const keyboardOptions = {
-        key: "Enter",
-        code: "Enter",
-        keyCode: 13,
-        which: 13,
-        charCode: 13,
-        bubbles: true,
-        cancelable: true
-      };
+    const findSendButton = () => {
+      const scope =
+        input.closest('[class*="chat" i],[class*="comment" i],[class*="input" i],form') ||
+        input.parentElement ||
+        document;
 
-      input.dispatchEvent(new KeyboardEvent("keydown", keyboardOptions));
-      input.dispatchEvent(new KeyboardEvent("keypress", keyboardOptions));
-      input.dispatchEvent(new KeyboardEvent("keyup", keyboardOptions));
+      return [...scope.querySelectorAll('button,[role="button"],[aria-label],[title]')]
+        .find(button => {
+          if (!this.isVisible(button)) return false;
+          const label = this.normalize(
+            button.innerText ||
+            button.textContent ||
+            button.getAttribute("aria-label") ||
+            button.getAttribute("title") ||
+            button.getAttribute("data-e2e") ||
+            button.getAttribute("data-testid") ||
+            ""
+          ).toLowerCase();
 
-      await this.wait(250);
+          return /enviar|send|publicar|comentar|submit/.test(label);
+        });
+    };
+
+    const rpcErrorVisible = () => {
+      const text = this.normalize(document.body?.innerText || "").toLowerCase();
+      return /rpc call error|rpc error|falha ao enviar|não foi possível enviar|nao foi possivel enviar/.test(text);
+    };
+
+    try {
+      setValue();
+      await this.wait(150);
+
+      const sendButton = findSendButton();
+
+      if (sendButton) {
+        sendButton.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,cancelable:true,view:window}));
+        sendButton.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,cancelable:true,view:window}));
+        sendButton.click();
+      } else {
+        const options = {
+          key:"Enter",code:"Enter",keyCode:13,which:13,charCode:13,
+          bubbles:true,cancelable:true
+        };
+        input.dispatchEvent(new KeyboardEvent("keydown",options));
+        input.dispatchEvent(new KeyboardEvent("keypress",options));
+        input.dispatchEvent(new KeyboardEvent("keyup",options));
+      }
+
+      await this.wait(600);
+
+      if (rpcErrorVisible()) {
+        return {
+          ok:false,
+          retryable:true,
+          error:"O TikTok retornou RPC call error ao enviar este comentário."
+        };
+      }
 
       const remaining = "value" in input
         ? this.normalize(input.value)
         : this.normalize(input.textContent);
 
-      return {
-        ok: remaining.length === 0,
-        remainingText: remaining,
-        error: remaining
-          ? "A mensagem foi preenchida, mas o TikTok não limpou o campo após o Enter."
-          : null
-      };
+      if (remaining === message) {
+        return {
+          ok:false,
+          retryable:true,
+          error:"O comentário não foi confirmado pelo TikTok."
+        };
+      }
+
+      return { ok:true, message };
     } catch (error) {
       return {
-        ok: false,
-        error: `Erro ao enviar comentário: ${error.message}`
+        ok:false,
+        retryable:true,
+        error:error?.message||"Erro inesperado ao enviar comentário."
       };
     }
   },
+
 
   clickButton(regex) {
     const button = [...document.querySelectorAll("button")]

@@ -14,6 +14,7 @@ const OrionContentAutomation = {
   previousLiveState: false,
   endTimerBusy: false,
   exactEndTimer: null,
+  endLiveEmergencyTimer: null,
   completedEndTimerAt: null,
 
   async init() {
@@ -112,15 +113,16 @@ const OrionContentAutomation = {
         this.commentIndex % comments.length;
 
       const message = comments[selectedIndex];
-      let result = await OrionDetector.sendChat(message);
+      let result={ok:false,error:"Envio não iniciado."};
 
-      if (!result.ok) {
-        await OrionDetector.wait(900);
-        result = await OrionDetector.sendChat(message);
+      for(let attempt=1;attempt<=3;attempt+=1){
+        result=await OrionDetector.sendChat(message);
+        if(result.ok)break;
+        if(attempt<3)await OrionDetector.wait(1200);
       }
 
       // Avança somente depois do envio confirmado.
-      // Se falhar, o mesmo comentário será tentado no próximo ciclo.
+      // Se falhar, o mesmo comentário permanece na fila.
       if (result.ok) {
         this.commentIndex =
           (this.commentIndex + 1) % comments.length;
@@ -227,6 +229,41 @@ const OrionContentAutomation = {
         reason: "timer-zero"
       }).catch(console.error);
     }, delay);
+  },
+
+  startEmergencyEndLoop(reason = "timer-zero") {
+    clearInterval(this.endLiveEmergencyTimer);
+
+    let attempts=0;
+    const maxAttempts=40;
+
+    const tryEnd=async()=>{
+      attempts+=1;
+      const result=await OrionDetector.endLive({
+        dryRun:false,
+        reason
+      });
+
+      chrome.runtime.sendMessage({
+        type:"ORION_AUTOMATION_EVENT",
+        payload:{
+          kind:result.ok?"emergency-end-success":"emergency-end-attempt",
+          reason,attempts,result,
+          createdAt:new Date().toISOString()
+        }
+      }).catch(()=>{});
+
+      if(result.ok||attempts>=maxAttempts){
+        clearInterval(this.endLiveEmergencyTimer);
+        this.endLiveEmergencyTimer=null;
+      }
+    };
+
+    tryEnd().catch(console.error);
+
+    this.endLiveEmergencyTimer=setInterval(()=>{
+      tryEnd().catch(console.error);
+    },500);
   },
 
   async handleEndTimer({ force = false, reason = "timer-zero" } = {}) {

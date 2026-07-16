@@ -1,0 +1,14 @@
+LIVE INFINITY v3.0.2
+
+- Corrigida URL do Telegram.
+- Token não é mais codificado incorretamente.
+- Comentários usam botão Enviar quando disponível.
+- Detecta RPC call error.
+- Até 3 tentativas por comentário.
+- Não avança a lista em caso de falha.
+- Timer zerado tenta encerrar a cada 500ms.
+- Avisos também repetem a tentativa de encerramento.
+- Detecção ampliada do botão de energia.
+
+Servidor: 3.0.2
+Extensão: 3.0.2
