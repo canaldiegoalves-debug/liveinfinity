@@ -8,6 +8,7 @@ const { URL } = require("url");
 const { pool, testConnection } = require("./db");
 
 const PORT = Number(process.env.PORT || 8787);
+const SERVER_VERSION = require("./package.json").version;
 const HOST = process.env.HOST || "127.0.0.1";
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
@@ -758,11 +759,13 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/health" && request.method === "GET") {
-      await pool.query("SELECT 1");
       json(response, 200, {
         ok: true,
+        service: "live-infinity",
+        version: SERVER_VERSION,
+        build: "v3",
         database: "mysql",
-        serverTime: nowIso()
+        now: new Date().toISOString()
       });
       return;
     }
@@ -1668,7 +1671,7 @@ const licenseMatch = url.pathname.match(
   await ensureUpdatesTable();
 
   server.listen(PORT, HOST, () => {
-    console.log(`Live Infinity v2: http://${HOST}:${PORT}`);
+    console.log(`Live Infinity ${SERVER_VERSION}: http://${HOST}:${PORT}`);
     console.log("Banco de dados: MySQL conectado");
     console.log(`Painel Admin: ${ADMIN_PANEL_PATH}`);
   });

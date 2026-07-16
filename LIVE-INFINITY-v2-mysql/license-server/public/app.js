@@ -33,6 +33,28 @@ const state = {
   updatesAvailable: false
 };
 
+
+async function loadServerVersion() {
+  try {
+    const response = await fetch("/api/health", {
+      cache: "no-store"
+    });
+
+    const body = await response.json();
+
+    const element = document.getElementById("server-version");
+
+    if (element) {
+      element.textContent = body?.version
+        ? `Servidor v${body.version}`
+        : "Versão indisponível";
+    }
+  } catch {
+    const element = document.getElementById("server-version");
+    if (element) element.textContent = "Versão indisponível";
+  }
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -134,6 +156,7 @@ function showLogin() {
 function showApp() {
   elements.login.classList.add("hidden");
   elements.app.classList.remove("hidden");
+    loadServerVersion();
 }
 
 async function loadData({ silent = false, render = true } = {}) {

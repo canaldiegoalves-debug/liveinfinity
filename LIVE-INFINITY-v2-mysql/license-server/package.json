@@ -1,6 +1,6 @@
 {
   "name": "live-infinity-license-server",
-  "version": "2.5.2",
+  "version": "3.0.0",
   "private": true,
   "description": "API e painel administrativo Live Infinity com MySQL",
   "scripts": {
@@ -10,7 +10,8 @@
     "db:migrate-json": "node scripts/migrate-json.js",
     "db:migrate-plans": "node scripts/migrate-plans.js",
     "db:migrate-cakto": "node scripts/migrate-cakto.js",
-    "db:migrate-access-accounts": "node scripts/migrate-access-accounts.js"
+    "db:migrate-access-accounts": "node scripts/migrate-access-accounts.js",
+    "verify": "node scripts/verify-deployment.js"
   },
   "engines": {
     "node": ">=18"

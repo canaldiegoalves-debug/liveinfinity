@@ -1,0 +1,21 @@
+LIVE INFINITY v3.0.0 — BASE CONSOLIDADA
+
+Inclui:
+- Segurança do painel Admin.
+- Telegram persistente.
+- Comentários salvos e sequenciais.
+- Atualizações obrigatórias pelo Admin.
+- Upload e histórico de ZIP.
+- Timer e encerramento automático.
+- Proteção contra avisos.
+- Contador de vendas sem multiplicação.
+- Prova social sem flood.
+- Bloqueio rigoroso de cupom.
+- Reinstalação no mesmo computador.
+- Pro/Premium com recursos avançados.
+
+Novidades da v3:
+- Endpoint /api/health informa a versão real do servidor.
+- Badge de versão no painel Admin.
+- Script npm run verify bloqueia deploy incompleto.
+- Arquivo DEPLOY-V3.txt com processo de branch nova.

@@ -1,0 +1,33 @@
+LIVE INFINITY v3.0.0 — DEPLOY
+
+1) No Windows, substitua:
+C:\Users\diegu\Downloads\liveinfinity\LIVE-INFINITY-v2-mysql
+
+2) Depois rode:
+cd C:\Users\diegu\Downloads\liveinfinity
+git checkout -b v3
+git add -A
+git commit -m "Live Infinity v3.0.0 consolidado"
+git push -u origin v3
+
+3) No VPS:
+cd /var/www/liveinfinity
+git fetch origin
+git checkout v3
+git pull origin v3
+
+cd /var/www/liveinfinity/LIVE-INFINITY-v2-mysql/license-server
+npm install
+npm run verify
+
+pm2 restart liveinfinity --update-env
+pm2 save
+pm2 flush
+
+4) Verificação:
+cat package.json | grep version
+npm run verify
+curl -s http://127.0.0.1:8787/api/health
+
+O retorno precisa mostrar:
+"version":"3.0.0"
