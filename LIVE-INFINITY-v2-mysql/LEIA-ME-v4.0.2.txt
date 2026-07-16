@@ -1,0 +1,10 @@
+LIVE INFINITY v4.0.2
+
+- Proteção não é mais ativada automaticamente.
+- Avisos só encerram quando a proteção estiver ligada.
+- Alertas dos primeiros 30 segundos são ignorados.
+- Timer encerra apenas quando realmente chegar a 00:00.
+- Iniciar a LIVE nunca chama o encerramento.
+
+Servidor: 4.0.2
+Extensão: 4.0.2

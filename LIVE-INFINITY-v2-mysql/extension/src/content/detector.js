@@ -22,6 +22,8 @@ window.OrionDetector = {
   emergencyEndBusy: false,
   emergencyWarningHash: "",
   uniqueSaleIds: new Set(),
+  liveStartedAt: 0,
+  previousDetectedLive: false,
 
   start() {
     if (this.observer) return;
@@ -29,7 +31,7 @@ window.OrionDetector = {
     this.scan();
 
     this.observer = new MutationObserver((mutations) => {
-      this.scanEmergencyWarnings(mutations);
+      this.scanEmergencyWarnings(mutations).catch(console.error);
 
       clearTimeout(this.debounce);
       this.debounce = setTimeout(() => this.scan(), 120);
@@ -86,7 +88,27 @@ window.OrionDetector = {
     return officialContainer&&!harmless.test(normalized)&&(warningTerms.test(normalized)||normalized.length>=12);
   },
 
-  scanEmergencyWarnings(mutations = []) {
+  async scanEmergencyWarnings(mutations = []) {
+    const stored = await chrome.storage.local.get([
+      ORION.STORAGE.SETTINGS
+    ]);
+
+    const settings = {
+      ...ORION.DEFAULTS,
+      ...(stored[ORION.STORAGE.SETTINGS] || {})
+    };
+
+    // Sem proteção ativada, aviso nunca encerra a LIVE.
+    if (!settings.protectionEnabled) return;
+
+    // Ignora avisos normais de carregamento no início.
+    if (
+      this.liveStartedAt &&
+      Date.now() - this.liveStartedAt < 30000
+    ) {
+      return;
+    }
+
     const candidates = new Set();
 
     for (const mutation of mutations) {
@@ -748,6 +770,17 @@ window.OrionDetector = {
       }
     }).catch(() => {});
 
+    if (!settings.protectionEnabled) {
+      this.state.protectionStatus = "warning";
+      this.publish();
+
+      return {
+        ok: true,
+        notifiedOnly: true,
+        violation
+      };
+    }
+
     this.state.protectionStatus = "ending";
     this.publish();
 
@@ -1080,6 +1113,19 @@ window.OrionDetector = {
       ]);
 
     this.state.dashboardDetected = dashboard;
+    const detectedLive = Boolean(live);
+
+    if (detectedLive && !this.previousDetectedLive) {
+      this.liveStartedAt = Date.now();
+      this.emergencyWarningHash = "";
+    }
+
+    if (!detectedLive) {
+      this.liveStartedAt = 0;
+      this.emergencyWarningHash = "";
+    }
+
+    this.previousDetectedLive = detectedLive;
     this.state.live = live;
 
     if (duration !== null) this.state.elapsedSeconds = duration;

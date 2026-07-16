@@ -435,16 +435,15 @@ const OrionContentAutomation = {
     const isLive = Boolean(OrionDetector.state.live);
 
     if (isLive && !this.previousLiveState) {
-      this.settings.protectionEnabled = true;
-
-      await chrome.storage.local.set({
-        [ORION.STORAGE.SETTINGS]: this.settings
-      });
-
+      // Mantém a preferência escolhida pelo usuário.
+      // A proteção nunca é ativada automaticamente.
       chrome.runtime.sendMessage({
         type: "ORION_AUTOMATION_EVENT",
         payload: {
-          kind: "protection-auto-enabled",
+          kind: "live-started",
+          protectionEnabled: Boolean(
+            this.settings.protectionEnabled
+          ),
           createdAt: new Date().toISOString()
         }
       }).catch(() => {});
@@ -457,7 +456,7 @@ const OrionContentAutomation = {
         chrome.runtime.sendMessage({
           type: "ORION_TELEGRAM_SEND",
           payload: {
-            text: "🛡️ A LIVE foi iniciada e a proteção contra violação foi ativada automaticamente."
+            text: "🔴 LIVE iniciada."
           }
         }).catch(() => {});
       }
