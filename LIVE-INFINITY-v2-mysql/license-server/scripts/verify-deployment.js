@@ -19,7 +19,7 @@ const adminApp = fs.readFileSync(
   "utf8"
 );
 
-const expected = "3.1.0";
+const expected = "3.2.0";
 
 const checks = [
   ["server version", packageJson.version === expected],

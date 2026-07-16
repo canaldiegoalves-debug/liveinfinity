@@ -1,0 +1,35 @@
+LIVE INFINITY v3.2.0 — CONSOLIDADO
+
+COMENTÁRIOS
+- Fluxo nativo do LiveFlow.
+- Setter do textarea e eventos de composição.
+- Envio em sequência pelo Enter.
+- Intervalos configurados preservados.
+
+ENCERRAMENTO
+- Seletor .arco-icon-im_close_chat.
+- Confirmação obrigatória.
+- Sem confirmação, não considera a LIVE encerrada.
+- Nova tentativa a cada 500 ms.
+- Timer e avisos usam o mesmo fluxo confiável.
+
+TELEGRAM
+- Configuração lida diretamente do armazenamento.
+- Teste e eventos reais usam a mesma função.
+- Notificação de venda, início, aviso e encerramento.
+- Erros reais da API são exibidos.
+
+PERMISSÕES
+- Removido acesso ao painel Admin.
+- Todos os subdomínios do TikTok liberados.
+- API separada em api.valoranegocios.com.br.
+
+INSTALAÇÃO DA API
+Após criar o DNS A "api", execute no VPS:
+
+cd /var/www/liveinfinity/LIVE-INFINITY-v2-mysql
+bash scripts/instalar-api-nginx.sh
+sudo certbot --nginx -d api.valoranegocios.com.br
+
+Servidor: 3.2.0
+Extensão: 3.2.0

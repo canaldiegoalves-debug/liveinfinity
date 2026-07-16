@@ -116,7 +116,7 @@ const OrionContentAutomation = {
       let result = await OrionDetector.sendChat(message);
 
       if (!result.ok && result.retryable) {
-        await OrionDetector.wait(1200);
+        await OrionDetector.wait(1000);
         result = await OrionDetector.sendChat(message);
       }
 
@@ -231,41 +231,127 @@ const OrionContentAutomation = {
   },
 
   startEmergencyEndLoop(reason = "timer-zero") {
-    clearInterval(this.endLiveEmergencyTimer);
+    clearTimeout(this.endLiveEmergencyTimer);
+    this.endLiveEmergencyTimer = null;
 
-    let attempts=0;
-    const maxAttempts=40;
+    let attempts = 0;
+    const maxAttempts = 30;
 
-    const tryEnd=async()=>{
-      attempts+=1;
-      const result=await OrionDetector.endLive({
-        dryRun:false,
+    const tryEnd = async () => {
+      attempts += 1;
+
+      const result = await OrionDetector.endLive({
+        dryRun: false,
         reason
       });
 
       chrome.runtime.sendMessage({
-        type:"ORION_AUTOMATION_EVENT",
-        payload:{
-          kind:result.ok?"emergency-end-success":"emergency-end-attempt",
-          reason,attempts,result,
-          createdAt:new Date().toISOString()
+        type: "ORION_AUTOMATION_EVENT",
+        payload: {
+          kind: result.ok
+            ? "emergency-end-confirmed"
+            : "emergency-end-retry",
+          reason,
+          attempts,
+          result,
+          createdAt: new Date().toISOString()
         }
-      }).catch(()=>{});
+      }).catch(() => {});
 
-      if(result.ok||attempts>=maxAttempts){
-        clearInterval(this.endLiveEmergencyTimer);
-        this.endLiveEmergencyTimer=null;
+      if (result.ok) {
+        this.finishEndTimerSuccess(reason, result);
+        return;
       }
+
+      if (attempts >= maxAttempts) {
+        this.finishEndTimerFailure(reason, result);
+        return;
+      }
+
+      this.endLiveEmergencyTimer = setTimeout(() => {
+        tryEnd().catch(console.error);
+      }, 500);
     };
 
     tryEnd().catch(console.error);
-
-    this.endLiveEmergencyTimer=setInterval(()=>{
-      tryEnd().catch(console.error);
-    },500);
   },
 
-  async handleEndTimer({ force = false, reason = "timer-zero" } = {}) {
+  async finishEndTimerSuccess(reason, result) {
+    clearTimeout(this.endLiveEmergencyTimer);
+    clearTimeout(this.exactEndTimer);
+
+    this.endLiveEmergencyTimer = null;
+    this.exactEndTimer = null;
+
+    this.settings.endTimerAt = null;
+    this.settings.endTimerPaused = false;
+    this.settings.endTimerRemainingMs = null;
+    this.settings.endTimerStartedAt = null;
+
+    await chrome.storage.local.set({
+      [ORION.STORAGE.SETTINGS]: this.settings
+    });
+
+    chrome.runtime.sendMessage({
+      type: "ORION_NOTIFY",
+      payload: {
+        title: "LIVE encerrada",
+        message:
+          reason === "timer-zero"
+            ? "O timer zerou e o encerramento foi confirmado."
+            : "A transmissão foi encerrada após um aviso."
+      }
+    }).catch(() => {});
+
+    const stored = await chrome.storage.local.get([
+      ORION.STORAGE.SETTINGS
+    ]);
+
+    const settings = {
+      ...ORION.DEFAULTS,
+      ...(stored[ORION.STORAGE.SETTINGS] || {})
+    };
+
+    if (
+      settings.telegramEnabled &&
+      settings.telegramToken &&
+      settings.telegramChatId
+    ) {
+      chrome.runtime.sendMessage({
+        type: "ORION_TELEGRAM_SEND",
+        payload: {
+          text:
+            reason === "timer-zero"
+              ? "⏱️ O timer zerou e a LIVE foi encerrada com confirmação."
+              : "🚨 A LIVE foi encerrada automaticamente após um aviso."
+        }
+      }).catch(() => {});
+    }
+
+    this.endTimerBusy = false;
+  },
+
+  async finishEndTimerFailure(reason, result) {
+    clearTimeout(this.endLiveEmergencyTimer);
+    this.endLiveEmergencyTimer = null;
+
+    chrome.runtime.sendMessage({
+      type: "ORION_NOTIFY",
+      payload: {
+        title: "Falha crítica ao encerrar a LIVE",
+        message:
+          result?.error ||
+          "O botão de confirmação não foi localizado após várias tentativas."
+      }
+    }).catch(() => {});
+
+    this.endTimerBusy = false;
+  },
+
+  async handleEndTimer({
+    force = false,
+    reason = "timer-zero"
+  } = {}) {
     const endTimerAt = Number(this.settings.endTimerAt || 0);
 
     if (this.settings.endTimerPaused) return;
@@ -277,69 +363,15 @@ const OrionContentAutomation = {
     this.endTimerBusy = true;
     this.completedEndTimerAt = endTimerAt;
 
-    try {
-      // Para as automações antes de encerrar a transmissão.
-      clearTimeout(this.commentTimer);
-      clearInterval(this.autoPinTimer);
-      this.commentTimer = null;
-      this.autoPinTimer = null;
-      this.autoPinBusy = false;
+    clearTimeout(this.commentTimer);
+    clearInterval(this.autoPinTimer);
 
-      const result = await OrionDetector.endLive({ dryRun: false, reason });
+    this.commentTimer = null;
+    this.autoPinTimer = null;
+    this.autoPinBusy = false;
 
-      clearTimeout(this.exactEndTimer);
-      this.exactEndTimer = null;
-      this.settings.endTimerAt = null;
-      this.settings.endTimerPaused = false;
-      this.settings.endTimerRemainingMs = null;
-      this.settings.endTimerStartedAt = null;
-      this.settings.endTimerPaused = false;
-      this.settings.endTimerRemainingMs = null;
-      this.settings.endTimerStartedAt = null;
-
-      await chrome.storage.local.set({
-        [ORION.STORAGE.SETTINGS]: this.settings
-      });
-
-      chrome.runtime.sendMessage({
-        type: "ORION_AUTOMATION_EVENT",
-        payload: {
-          kind: result.ok ? "timer-live-ended" : "timer-live-end-failed",
-          result,
-          scheduledAt: endTimerAt,
-          reason,
-          createdAt: new Date().toISOString()
-        }
-      }).catch(() => {});
-
-      chrome.runtime.sendMessage({
-        type: "ORION_NOTIFY",
-        payload: {
-          title: result.ok
-            ? "LIVE encerrada"
-            : "Falha ao encerrar a LIVE",
-          message: result.ok
-            ? "O tempo programado terminou e a transmissão foi encerrada."
-            : result.error
-        }
-      }).catch(() => {});
-    } catch (error) {
-      this.settings.endTimerAt = null;
-
-      await chrome.storage.local.set({
-        [ORION.STORAGE.SETTINGS]: this.settings
-      });
-
-      chrome.runtime.sendMessage({
-        type: "ORION_NOTIFY",
-        payload: {
-          title: "Falha ao encerrar a LIVE",
-          message: error?.message || "Erro inesperado no encerramento automático."
-        }
-      }).catch(() => {});
-    } finally {
-      this.endTimerBusy = false;
-    }
+    // Não considera encerrado até clicar no botão de confirmação.
+    this.startEmergencyEndLoop(reason);
   },
 
   async handleLiveTransition() {
@@ -413,6 +445,24 @@ const OrionContentAutomation = {
 
     this.lastKnownSalesCount=currentCount;
     this.pendingSalesCount=currentCount;
+
+    if (
+      this.settings.telegramEnabled &&
+      this.settings.telegramToken &&
+      this.settings.telegramChatId
+    ) {
+      chrome.runtime.sendMessage({
+        type: "ORION_TELEGRAM_SEND",
+        payload: {
+          text:
+            `🛒 Nova venda detectada\n` +
+            `Total de vendas na LIVE: ${currentCount}\n` +
+            `GMV atual: R$ ${Number(OrionDetector.state.gmv || 0)
+              .toFixed(2)
+              .replace(".", ",")}`
+        }
+      }).catch(() => {});
+    }
 
     if(!this.settings.postSaleEnabled)return;
 

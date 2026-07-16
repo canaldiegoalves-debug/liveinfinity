@@ -110,7 +110,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             ok: false,
             error:
               body?.description ||
-              `Telegram retornou HTTP ${response.status}.`
+              (
+                response.status === 401
+                  ? "Token do Bot inválido."
+                  : response.status === 400
+                    ? "Chat ID inválido ou o bot ainda não recebeu uma mensagem."
+                    : `Telegram retornou HTTP ${response.status}.`
+              )
           });
           return;
         }

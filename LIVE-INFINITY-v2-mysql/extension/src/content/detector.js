@@ -137,18 +137,6 @@ window.OrionDetector = {
         warningText: text
       }).catch(console.error);
 
-      let warningAttempts=0;
-      const warningRetry=setInterval(async()=>{
-        warningAttempts+=1;
-        const result=await this.endLive({
-          dryRun:false,
-          reason:"warning"
-        });
-        if(result.ok||warningAttempts>=20){
-          clearInterval(warningRetry);
-        }
-      },500);
-
       return;
     }
   },
@@ -1006,13 +994,13 @@ window.OrionDetector = {
     }
 
     return {
-      ok: true,
+      ok: false,
+      retryable: true,
       reason,
-      stage: "initial-click",
+      stage: "confirmation-not-found",
       initialButton: initial.text,
-      warning:
-        "A interface não exibiu um segundo botão de confirmação.",
-      completedAt: new Date().toISOString()
+      error:
+        "O botão inicial foi clicado, mas a confirmação de encerramento não apareceu."
     };
   },
 
