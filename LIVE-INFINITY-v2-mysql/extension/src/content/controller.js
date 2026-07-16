@@ -77,42 +77,53 @@ const OrionContentAutomation = {
 
   scheduleNextComment() {
     clearTimeout(this.commentTimer);
+    this.commentTimer = null;
 
     if (!this.settings.commentsEnabled) return;
 
-    const comments = (this.settings.comments || [])
-      .map((value) => String(value || "").trim())
-      .filter(Boolean);
+    const comments = Array.isArray(this.settings.comments)
+      ? this.settings.comments
+          .map(value => String(value || "").trim())
+          .filter(Boolean)
+      : [];
 
     if (!comments.length) return;
 
-    const configuredMinimum =
-      Math.floor(Number(this.settings.minCommentDelay));
-    const configuredMaximum =
-      Math.floor(Number(this.settings.maxCommentDelay));
+    const configuredMinimum = Math.floor(
+      Number(this.settings.minCommentDelay)
+    );
 
-    const validMinimum =
-      Number.isFinite(configuredMinimum) && configuredMinimum >= 1
+    const configuredMaximum = Math.floor(
+      Number(this.settings.maxCommentDelay)
+    );
+
+    const minimum =
+      Number.isFinite(configuredMinimum) &&
+      configuredMinimum >= 1
         ? configuredMinimum
         : 45;
 
-    const validMaximum =
-      Number.isFinite(configuredMaximum) && configuredMaximum >= 1
+    const maximum =
+      Number.isFinite(configuredMaximum) &&
+      configuredMaximum >= 1
         ? configuredMaximum
         : 90;
 
-    const minimum = Math.min(validMinimum, validMaximum);
-    const maximum = Math.max(validMinimum, validMaximum);
+    const lower = Math.min(minimum, maximum);
+    const upper = Math.max(minimum, maximum);
 
-    // O intervalo escolhido sempre fica dentro dos valores do painel.
     const seconds =
-      Math.floor(Math.random() * (maximum - minimum + 1)) + minimum;
+      Math.floor(Math.random() * (upper - lower + 1)) +
+      lower;
 
     this.commentTimer = setTimeout(async () => {
+      if (!this.settings.commentsEnabled) return;
+
       const selectedIndex =
         this.commentIndex % comments.length;
 
       const message = comments[selectedIndex];
+
       let result = await OrionDetector.sendChat(message);
 
       if (!result.ok && result.retryable) {
@@ -120,8 +131,6 @@ const OrionContentAutomation = {
         result = await OrionDetector.sendChat(message);
       }
 
-      // Ordem fixa: primeiro, segundo, terceiro...
-      // Só avança quando a rotina de envio foi executada.
       if (result.ok) {
         this.commentIndex =
           (this.commentIndex + 1) % comments.length;
@@ -130,17 +139,21 @@ const OrionContentAutomation = {
       chrome.runtime.sendMessage({
         type: "ORION_AUTOMATION_EVENT",
         payload: {
-          kind: result.ok ? "comment-sent" : "comment-failed",
+          kind: result.ok
+            ? "comment-sent"
+            : "comment-failed",
+          selectedIndex,
           message,
-          delaySeconds: seconds,
           result,
           createdAt: new Date().toISOString()
         }
       }).catch(() => {});
 
+      // Agenda somente depois de terminar o envio atual.
       this.scheduleNextComment();
     }, seconds * 1000);
   },
+
 
   configureAutoPin() {
     clearInterval(this.autoPinTimer);
@@ -237,7 +250,7 @@ const OrionContentAutomation = {
     let attempts = 0;
     const maxAttempts = 30;
 
-    const tryEnd = async () => {
+    const attemptEnd = async () => {
       attempts += 1;
 
       const result = await OrionDetector.endLive({
@@ -249,8 +262,8 @@ const OrionContentAutomation = {
         type: "ORION_AUTOMATION_EVENT",
         payload: {
           kind: result.ok
-            ? "emergency-end-confirmed"
-            : "emergency-end-retry",
+            ? "live-end-confirmed"
+            : "live-end-retry",
           reason,
           attempts,
           result,
@@ -259,21 +272,28 @@ const OrionContentAutomation = {
       }).catch(() => {});
 
       if (result.ok) {
-        this.finishEndTimerSuccess(reason, result);
+        await this.finishEndTimerSuccess(
+          reason,
+          result
+        );
         return;
       }
 
       if (attempts >= maxAttempts) {
-        this.finishEndTimerFailure(reason, result);
+        await this.finishEndTimerFailure(
+          reason,
+          result
+        );
         return;
       }
 
-      this.endLiveEmergencyTimer = setTimeout(() => {
-        tryEnd().catch(console.error);
-      }, 500);
+      this.endLiveEmergencyTimer = setTimeout(
+        () => attemptEnd().catch(console.error),
+        500
+      );
     };
 
-    tryEnd().catch(console.error);
+    attemptEnd().catch(console.error);
   },
 
   async finishEndTimerSuccess(reason, result) {

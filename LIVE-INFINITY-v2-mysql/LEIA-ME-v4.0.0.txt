@@ -1,0 +1,30 @@
+LIVE INFINITY v4.0.0 — MÓDULOS CRÍTICOS
+
+COMENTÁRIOS
+- Implementação nativa compatível com React.
+- Setter do textarea.
+- Eventos input, change e composição.
+- Envio por Enter.
+- Fila estritamente sequencial.
+- Um único timeout por vez.
+- Intervalo mínimo e máximo preservados.
+
+ENCERRAMENTO
+- Seletor exato .arco-icon-im_close_chat.
+- Fallbacks close_chat e im_close.
+- Confirmação obrigatória.
+- Sem confirmação, o sistema continua tentando.
+- Timer e aviso usam a mesma máquina de estados.
+
+TELEGRAM
+- Uma única função para teste e eventos.
+- Token e Chat ID lidos do armazenamento.
+- Erros reais da API retornam para a interface.
+
+PERMISSÕES
+- Sem permissão para admin.valoranegocios.com.br.
+- Todos os subdomínios do TikTok.
+- API separada em api.valoranegocios.com.br.
+
+Servidor: 4.0.0
+Extensão: 4.0.0

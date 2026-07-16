@@ -51,7 +51,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         "orionSettings"
       ]);
 
-      const settings = stored.orionSettings || {};
+      const settings =
+        stored.orionSettings || {};
 
       const token = String(
         message?.payload?.token ||
@@ -73,7 +74,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({
           ok: false,
           error:
-            "Token, Chat ID ou mensagem do Telegram não configurados."
+            "Token, Chat ID ou mensagem não configurados."
         });
         return;
       }
@@ -108,6 +109,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!response.ok || body?.ok === false) {
           sendResponse({
             ok: false,
+            status: response.status,
             error:
               body?.description ||
               (

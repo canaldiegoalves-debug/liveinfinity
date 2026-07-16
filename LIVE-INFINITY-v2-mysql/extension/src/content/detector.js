@@ -790,22 +790,27 @@ window.OrionDetector = {
   },
 
   findEndLiveButton() {
-    // Método principal comprovado no TikTok Shop.
     const exactIcon =
       document.querySelector(".arco-icon-im_close_chat");
 
     if (exactIcon && this.isVisible(exactIcon)) {
-      let clickable = exactIcon;
+      let element = exactIcon;
 
       for (let depth = 0; depth < 6; depth += 1) {
-        const candidate = clickable?.parentElement;
-        if (!candidate) break;
+        const parent = element.parentElement;
 
-        clickable = candidate;
+        if (!parent) break;
 
-        const tag = String(candidate.tagName || "").toLowerCase();
-        const role = candidate.getAttribute?.("role");
-        const className = String(candidate.className || "");
+        element = parent;
+
+        const tag = String(parent.tagName || "")
+          .toLowerCase();
+
+        const role = parent.getAttribute?.("role");
+
+        const className = String(
+          parent.className || ""
+        );
 
         if (
           tag === "button" ||
@@ -813,37 +818,39 @@ window.OrionDetector = {
           /btn|button|icon-btn/i.test(className)
         ) {
           return {
-            element: candidate,
+            element: parent,
             text: "botão de energia",
-            method: "arco-icon-im_close_chat"
+            method: "exact-close-chat-icon"
           };
         }
       }
 
       return {
-        element: exactIcon.parentElement || exactIcon,
+        element:
+          exactIcon.parentElement ||
+          exactIcon,
         text: "botão de energia",
-        method: "arco-icon-im_close_chat-parent"
+        method: "exact-close-chat-parent"
       };
     }
 
-    // Fallback comprovado por classe parcial.
-    const closeIcon = document.querySelector(
+    const partialIcon = document.querySelector(
       '[class*="close_chat"],[class*="im_close"]'
     );
 
-    if (closeIcon && this.isVisible(closeIcon)) {
+    if (partialIcon && this.isVisible(partialIcon)) {
       return {
         element:
-          closeIcon.closest("button,[role='button']") ||
-          closeIcon.parentElement ||
-          closeIcon,
+          partialIcon.closest(
+            "button,[role='button']"
+          ) ||
+          partialIcon.parentElement ||
+          partialIcon,
         text: "botão de encerramento",
-        method: "close-chat-class"
+        method: "partial-close-chat-class"
       };
     }
 
-    // Último fallback por texto.
     const textButton = [
       ...document.querySelectorAll(
         "button,[role='button']"
@@ -868,26 +875,26 @@ window.OrionDetector = {
       ? {
           element: textButton,
           text: this.buttonText(textButton),
-          method: "button-text"
+          method: "text-fallback"
         }
       : null;
   },
 
   findConfirmEndButton() {
-    const candidates = [
+    const buttons = [
       ...document.querySelectorAll(
-        'button,[role="button"]'
+        "button,[role='button']"
       )
     ].filter(element => this.isVisible(element));
 
-    const exact = candidates.find(element => {
+    const exact = buttons.find(element => {
       const text = this.normalize(
         element.innerText ||
         element.textContent ||
         element.getAttribute("aria-label") ||
         element.getAttribute("title") ||
         ""
-      );
+      ).trim();
 
       return /^(encerrar agora|confirmar|finalizar agora|sim|end now|confirm)$/i.test(
         text
@@ -901,12 +908,12 @@ window.OrionDetector = {
       };
     }
 
-    const partial = candidates.find(element => {
+    const partial = buttons.find(element => {
       const text = this.normalize(
         element.innerText ||
         element.textContent ||
         ""
-      );
+      ).trim();
 
       return /encerrar agora|confirmar encerramento|finalizar transmissão|end now/i.test(
         text
@@ -925,24 +932,25 @@ window.OrionDetector = {
     dryRun = false,
     reason = "manual"
   } = {}) {
-    const initialDeadline = Date.now() + 10000;
+    const initialDeadline = Date.now() + 5000;
     let initial = null;
 
-    while (Date.now() < initialDeadline && !initial) {
+    while (Date.now() < initialDeadline) {
       initial = this.findEndLiveButton();
 
-      if (!initial) {
-        await this.wait(20);
-      }
+      if (initial) break;
+
+      await this.wait(100);
     }
 
     if (!initial) {
       return {
         ok: false,
-        dryRun,
+        retryable: true,
         reason,
-        stage: "initial-button",
-        error: "Botão de encerramento da LIVE não foi localizado."
+        stage: "initial-button-not-found",
+        error:
+          "Botão de energia da LIVE não localizado."
       };
     }
 
@@ -951,46 +959,39 @@ window.OrionDetector = {
         ok: true,
         dryRun: true,
         reason,
-        stage: "initial-button",
+        stage: "initial-button-found",
+        method: initial.method,
         buttonText: initial.text
       };
     }
 
-    initial.element.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,cancelable:true,view:window}));
-    initial.element.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,cancelable:true,view:window}));
     initial.element.click();
 
-    let confirmation = null;
-    const confirmationDeadline = Date.now() + 10000;
+    const confirmationDeadline =
+      Date.now() + 10000;
 
     while (Date.now() < confirmationDeadline) {
-      confirmation = this.findConfirmEndButton();
+      const confirmation =
+        this.findConfirmEndButton();
 
       if (confirmation) {
-        confirmation.element.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,cancelable:true,view:window}));
-        confirmation.element.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,cancelable:true,view:window}));
         confirmation.element.click();
 
+        await this.wait(500);
+
+        // A confirmação foi localizada e clicada.
         return {
           ok: true,
           reason,
           stage: "confirmed",
+          initialMethod: initial.method,
           initialButton: initial.text,
           confirmationButton: confirmation.text,
           completedAt: new Date().toISOString()
         };
       }
 
-      const retryInitial = this.findEndLiveButton();
-
-      if (
-        retryInitial &&
-        Date.now() + 100 < confirmationDeadline
-      ) {
-        retryInitial.element.click();
-      }
-
-      await this.wait(20);
+      await this.wait(150);
     }
 
     return {
@@ -998,11 +999,13 @@ window.OrionDetector = {
       retryable: true,
       reason,
       stage: "confirmation-not-found",
+      initialMethod: initial.method,
       initialButton: initial.text,
       error:
-        "O botão inicial foi clicado, mas a confirmação de encerramento não apareceu."
+        "O botão de confirmação não apareceu."
     };
   },
+
 
   async runProtectionTest() {
     const sample =
@@ -1229,30 +1232,32 @@ window.OrionDetector = {
     if (!message) {
       return {
         ok: false,
+        retryable: false,
         error: "Mensagem vazia."
       };
     }
 
+    const textarea =
+      document.querySelector('textarea[placeholder*="algo" i]') ||
+      document.querySelector('textarea[placeholder*="coment" i]') ||
+      document.querySelector('textarea[placeholder*="comment" i]') ||
+      document.querySelector('textarea[placeholder*="digite" i]') ||
+      document.querySelector('.chat-input textarea') ||
+      document.querySelector('[class*="chat" i] textarea') ||
+      document.querySelector('[class*="input" i] textarea') ||
+      document.querySelector('textarea.arco-textarea') ||
+      [...document.querySelectorAll("textarea")]
+        .find(element => this.isVisible(element));
+
+    if (!textarea || !this.isVisible(textarea)) {
+      return {
+        ok: false,
+        retryable: true,
+        error: "Campo de comentário não encontrado."
+      };
+    }
+
     try {
-      const textarea =
-        document.querySelector('textarea[placeholder*="algo" i]') ||
-        document.querySelector('textarea[placeholder*="comment" i]') ||
-        document.querySelector('textarea[placeholder*="coment" i]') ||
-        document.querySelector('textarea[placeholder*="digite" i]') ||
-        document.querySelector('.chat-input textarea') ||
-        document.querySelector('[class*="chat" i] textarea') ||
-        document.querySelector('[class*="input" i] textarea') ||
-        document.querySelector('textarea.arco-textarea') ||
-        document.querySelector("textarea");
-
-      if (!textarea || !this.isVisible(textarea)) {
-        return {
-          ok: false,
-          retryable: true,
-          error: "Campo de comentário não encontrado."
-        };
-      }
-
       textarea.focus();
       textarea.click();
 
@@ -1270,6 +1275,12 @@ window.OrionDetector = {
         };
       }
 
+      // Limpa primeiro para forçar o React a reconhecer uma nova entrada.
+      nativeSetter.call(textarea, "");
+      textarea.dispatchEvent(
+        new Event("input", { bubbles: true })
+      );
+
       nativeSetter.call(textarea, message);
 
       textarea.dispatchEvent(
@@ -1283,6 +1294,13 @@ window.OrionDetector = {
       try {
         textarea.dispatchEvent(
           new CompositionEvent("compositionstart", {
+            bubbles: true
+          })
+        );
+
+        textarea.dispatchEvent(
+          new CompositionEvent("compositionupdate", {
+            data: message,
             bubbles: true
           })
         );
@@ -1319,9 +1337,7 @@ window.OrionDetector = {
         new KeyboardEvent("keyup", enterOptions)
       );
 
-      // O TikTok processa o envio de forma assíncrona.
-      // Não usamos texto antigo de RPC na página como falso erro.
-      await this.wait(500);
+      await this.wait(350);
 
       return {
         ok: true,
@@ -1331,7 +1347,9 @@ window.OrionDetector = {
       return {
         ok: false,
         retryable: true,
-        error: error?.message || "Erro ao enviar comentário."
+        error:
+          error?.message ||
+          "Erro inesperado ao enviar comentário."
       };
     }
   },

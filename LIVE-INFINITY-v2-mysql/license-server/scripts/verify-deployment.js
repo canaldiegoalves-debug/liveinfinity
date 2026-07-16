@@ -19,7 +19,7 @@ const adminApp = fs.readFileSync(
   "utf8"
 );
 
-const expected = "3.2.0";
+const expected = "4.0.0";
 
 const checks = [
   ["server version", packageJson.version === expected],
@@ -43,4 +43,4 @@ if (failed) {
   process.exit(1);
 }
 
-console.log("\nLive Infinity v3.0.0 verificada com sucesso.");
+console.log("\nLive Infinity v4.0.0 verificada com sucesso.");
