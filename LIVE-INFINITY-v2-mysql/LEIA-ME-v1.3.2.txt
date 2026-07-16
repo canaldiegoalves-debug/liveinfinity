@@ -1,0 +1,8 @@
+LIVE INFINITY v1.3.2
+
+- IA e vídeos liberados nos planos Pro e Premium.
+- Plano Básico continua bloqueado.
+- O plano da conta é a fonte de verdade na ativação e validação.
+- Alterações manuais de plano passam a aparecer na extensão após validar novamente.
+- Servidor atualizado para 2.3.3.
+- Extensão atualizada para 1.3.2.

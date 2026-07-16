@@ -6,8 +6,63 @@ const state={
   settings:{...ORION.DEFAULTS},
   collapse:{},
   live:{dashboardDetected:false,live:false,elapsedSeconds:0,viewers:null,sales:0,gmv:null,product:null,saleEvents:[],chatMessages:[],violation:null,protectionStatus:"idle",lastScanAt:null},
-  commentTimer:null,endAt:null,endTimer:null,timerPaused:false,timerRemainingMs:null,audio:null,audioFiles:[],videoFiles:[],audioIndex:0,ambientContext:null,ambientNodes:[],ambientTimers:[],protectionEvents:[],pendingRender:false,licenseError:""
+  commentTimer:null,endAt:null,endTimer:null,timerPaused:false,timerRemainingMs:null,audio:null,audioFiles:[],videoFiles:[],audioIndex:0,ambientContext:null,ambientNodes:[],ambientTimers:[],protectionEvents:[],pendingRender:false,licenseError:"",updateInfo:null,updateChecking:false
 };
+
+
+async function sha256Hex(value){
+  const bytes=new TextEncoder().encode(value);
+  const digest=await crypto.subtle.digest("SHA-256",bytes);
+  return [...new Uint8Array(digest)]
+    .map(byte=>byte.toString(16).padStart(2,"0"))
+    .join("");
+}
+
+function webglIdentity(){
+  try{
+    const canvas=document.createElement("canvas");
+    const gl=canvas.getContext("webgl")||canvas.getContext("experimental-webgl");
+    if(!gl)return "";
+
+    const extension=gl.getExtension("WEBGL_debug_renderer_info");
+    const vendor=extension
+      ?gl.getParameter(extension.UNMASKED_VENDOR_WEBGL)
+      :gl.getParameter(gl.VENDOR);
+    const renderer=extension
+      ?gl.getParameter(extension.UNMASKED_RENDERER_WEBGL)
+      :gl.getParameter(gl.RENDERER);
+
+    return `${vendor||""}|${renderer||""}`;
+  }catch{
+    return "";
+  }
+}
+
+async function computerFingerprint(){
+  const highEntropy=await navigator.userAgentData?.getHighEntropyValues?.([
+    "architecture",
+    "bitness",
+    "model",
+    "platformVersion"
+  ]).catch(()=>({}))||{};
+
+  const signals=[
+    navigator.userAgentData?.platform||navigator.platform||"",
+    highEntropy.architecture||"",
+    highEntropy.bitness||"",
+    highEntropy.model||"",
+    navigator.hardwareConcurrency||0,
+    navigator.deviceMemory||0,
+    screen.width||0,
+    screen.height||0,
+    screen.colorDepth||0,
+    Intl.DateTimeFormat().resolvedOptions().timeZone||"",
+    navigator.languages?.join(",")||navigator.language||"",
+    webglIdentity()
+  ];
+
+  return sha256Hex(signals.join("||"));
+}
 
 async function ensureDeviceId(){
   const data=await chrome.storage.local.get([
@@ -33,6 +88,7 @@ async function validateOnlineLicense(license){
   }
 
   const deviceId=await ensureDeviceId();
+  const deviceFingerprint=await computerFingerprint();
 
   const response=await fetch(
     `${ORION.API_BASE_URL}/api/validate`,
@@ -44,7 +100,8 @@ async function validateOnlineLicense(license){
       body:JSON.stringify({
         email:license.email,
         key:license.key,
-        deviceId
+        deviceId,
+        deviceFingerprint
       })
     }
   );
@@ -60,6 +117,13 @@ async function validateOnlineLicense(license){
 
   const validated={
     ...body.license,
+    plan:String(
+      body.license?.plan ||
+      body.accountPlan ||
+      body.plan ||
+      license.plan ||
+      "basic"
+    ).toLowerCase(),
     active:true,
     validatedAt:new Date().toISOString()
   };
@@ -71,7 +135,113 @@ async function validateOnlineLicense(license){
   return validated;
 }
 
+
+function compareAppVersions(left,right){
+  const a=String(left||"0.0.0").split("-")[0].split(".").map(Number);
+  const b=String(right||"0.0.0").split("-")[0].split(".").map(Number);
+
+  for(let index=0;index<3;index+=1){
+    const difference=(a[index]||0)-(b[index]||0);
+    if(difference!==0)return difference;
+  }
+
+  return 0;
+}
+
+async function checkMandatoryUpdate(){
+  if(state.updateChecking)return state.updateInfo;
+  state.updateChecking=true;
+
+  try{
+    const manifest=chrome.runtime.getManifest();
+    const response=await fetch(
+      `${ORION.API_BASE_URL}/api/updates/latest?currentVersion=${encodeURIComponent(manifest.version)}`,
+      {cache:"no-store"}
+    );
+
+    const body=await response.json().catch(()=>({}));
+
+    if(!response.ok||!body.ok){
+      throw new Error(body.error||"Não foi possível verificar atualizações.");
+    }
+
+    state.updateInfo=
+      body.mandatory&&
+      body.update&&
+      compareAppVersions(body.update.version,manifest.version)>0
+        ?body.update
+        :null;
+
+    return state.updateInfo;
+  }catch(error){
+    // Sem bloquear por falha temporária de internet.
+    console.warn("Falha ao verificar atualização:",error);
+    return state.updateInfo;
+  }finally{
+    state.updateChecking=false;
+  }
+}
+
+function mandatoryUpdateHtml(){
+  const update=state.updateInfo;
+  if(!update)return"";
+
+  const items=String(update.changelog||"")
+    .split(/\r?\n/)
+    .map(item=>item.replace(/^[-•✔\s]+/,"").trim())
+    .filter(Boolean);
+
+  return`
+    <div class="mandatory-update-overlay">
+      <div class="mandatory-update-modal">
+        <div class="mandatory-update-icon">⬆️</div>
+        <span class="mandatory-update-kicker">ATUALIZAÇÃO OBRIGATÓRIA</span>
+        <h2>${esc(update.title||"Nova versão disponível")}</h2>
+        <strong>Versão ${esc(update.version)}</strong>
+
+        <p>${esc(update.description||"Atualize para continuar usando o Live Infinity.")}</p>
+
+        ${items.length?`
+          <div class="mandatory-update-changelog">
+            ${items.map(item=>`<div>✔ ${esc(item)}</div>`).join("")}
+          </div>
+        `:""}
+
+        <div class="mandatory-update-warning">
+          O sistema ficará bloqueado até a nova versão ser instalada.
+        </div>
+
+        <a
+          id="mandatory-update-download"
+          class="mandatory-update-download"
+          href="${esc(update.downloadUrl)}"
+          target="_blank"
+          rel="noopener"
+        >
+          📥 Baixar atualização
+        </a>
+
+        <details class="mandatory-update-help">
+          <summary>Como instalar</summary>
+          <ol>
+            <li>Baixe e extraia o ZIP.</li>
+            <li>Abra <code>chrome://extensions</code>.</li>
+            <li>Remova a versão antiga.</li>
+            <li>Clique em Carregar sem compactação.</li>
+            <li>Selecione a nova pasta <code>extension</code>.</li>
+          </ol>
+        </details>
+
+        <small>
+          Versão instalada: ${esc(chrome.runtime.getManifest().version)}
+        </small>
+      </div>
+    </div>
+  `;
+}
+
 async function load(){
+  await checkMandatoryUpdate();
   const data=await chrome.storage.local.get([
     ORION.STORAGE.LICENSE,
     ORION.STORAGE.SETTINGS,
@@ -109,7 +279,7 @@ async function load(){
 async function saveSettings(){await chrome.storage.local.set({[ORION.STORAGE.SETTINGS]:state.settings})}
 async function saveCollapse(){await chrome.storage.local.set({[ORION.STORAGE.COLLAPSE]:state.collapse})}
 function valid(){return !!(state.license?.active&&new Date(state.license.expiresAt)>new Date())}
-function pro(){return state.license?.plan==="pro"}
+function pro(){return ["pro","premium"].includes(String(state.license?.plan||"").toLowerCase())}
 
   document.getElementById("download-cash-sound")?.addEventListener("click", async () => {
     try {
@@ -163,6 +333,7 @@ async function post(type,payload={}){
 }
 async function activate(email,key){
   const deviceId=await ensureDeviceId();
+  const deviceFingerprint=await computerFingerprint();
 
   const response=await fetch(
     `${ORION.API_BASE_URL}/api/activate`,
@@ -174,7 +345,8 @@ async function activate(email,key){
       body:JSON.stringify({
         email:email.trim(),
         key:key.trim().toUpperCase(),
-        deviceId
+        deviceId,
+        deviceFingerprint
       })
     }
   );
@@ -190,6 +362,12 @@ async function activate(email,key){
 
   state.license={
     ...body.license,
+    plan:String(
+      body.license?.plan ||
+      body.accountPlan ||
+      body.plan ||
+      "basic"
+    ).toLowerCase(),
     active:true,
     validatedAt:new Date().toISOString()
   };
@@ -207,7 +385,7 @@ function header(){
       <img class="brand-logo" src="../../assets/live-infinity-icon.png" alt="Live Infinity">
       <div>
         <strong><span class="live-word">LIVE</span> <span class="infinity-word">INFINITY</span></strong>
-        <small>Plano ${pro()?"Pro":"Básico"} · Automação infinita</small>
+        <small>Plano ${String(state.license?.plan||"basic").toLowerCase()==="premium"?"Premium":pro()?"Pro":"Básico"} · Automação infinita</small>
       </div>
     </div>
     <span class="status-pill ${state.live.live?"active":""}">${state.live.live?"● LIVE ATIVA":"AGUARDANDO"}</span>
@@ -277,7 +455,7 @@ function login(){
     return;
   }
 
-  app.innerHTML=`<header class="brand-header login-brand">
+  app.innerHTML=`${mandatoryUpdateHtml()}<header class="brand-header login-brand">
     <div class="brand">
       <img class="brand-logo" src="../../assets/live-infinity-icon.png" alt="Live Infinity">
       <div>
@@ -333,7 +511,7 @@ function login(){
 }
 function page(){
   const el=document.getElementById("page");
-  if((state.page==="ai"||state.page==="video")&&!pro()){el.innerHTML=`<div class="locked"><h2>🔒 Recurso Pro</h2><p>Disponível apenas no Plano Pro.</p></div>`;return}
+  if((state.page==="ai"||state.page==="video")&&!pro()){el.innerHTML=`<div class="locked"><h2>🔒 Recurso avançado</h2><p>Disponível nos planos Pro e Premium.</p></div>`;return}
   el.innerHTML=state.page==="home"?home():state.page==="audio"?audio():state.page==="ai"?ai():state.page==="video"?video():settings();
   bind();
 }
@@ -481,11 +659,117 @@ function home(){
       <span>${state.live.violation?esc(state.live.violation.text.slice(0,220)):"Nenhum aviso crítico detectado."}</span>
     </div>
     <div class="toggle-line"><span>Notificar no Telegram</span><input id="protection-telegram" class="toggle" type="checkbox" ${state.settings.protectionTelegram!==false?"checked":""}></div>
-    <label>Tempo mínimo entre ações (segundos)</label><input id="protection-cooldown" type="number" min="30" value="${state.settings.protectionCooldownSeconds||120}">
+    
     <div class="actions"><button id="protection-save" class="btn-primary">Salvar proteção</button><button id="protection-test" class="btn-secondary">Executar teste seguro</button></div>
     <div class="actions"><button id="protection-end-now" class="btn-danger">Encerrar LIVE agora</button></div>
     <p id="protection-msg" class="helper">O teste seguro valida a detecção e procura o botão de encerramento sem clicar nele.</p>
     <div class="event-list">${state.protectionEvents.slice(-5).reverse().map(event=>`<p>${esc(event)}</p>`).join("")||"<p>Nenhum evento de proteção.</p>"}</div>
+  `)}
+
+  ${section("comments","🗨️","Comentários Automáticos","mensagens em intervalos aleatórios",`
+    <textarea id="comments">${esc(state.settings.comments.join("\n"))}</textarea>
+    <div class="card-row"><div><label>Mínimo</label><input id="min-delay" type="number" value="${state.settings.minCommentDelay}"></div><div><label>Máximo</label><input id="max-delay" type="number" value="${state.settings.maxCommentDelay}"></div></div>
+    <div class="actions"><button id="comments-start" class="btn-primary">▶ Iniciar</button><button id="comments-stop" class="btn-danger">■ Parar</button></div>
+    <p id="comments-status" class="helper">${state.settings.commentsEnabled?"Automação ativa no TikTok.":"Automação parada."}</p>
+  `,false)}
+
+  ${section("telegram","✈️","Notificações Telegram","receba alertas diretamente no celular",`
+    <div class="telegram-status-card ${state.settings.telegramEnabled&&state.settings.telegramToken&&state.settings.telegramChatId?"configured":"pending"}">
+      <div class="telegram-status-icon">
+        ${state.settings.telegramEnabled&&state.settings.telegramToken&&state.settings.telegramChatId?"✅":"✈️"}
+      </div>
+
+      <strong>
+        ${state.settings.telegramEnabled&&state.settings.telegramToken&&state.settings.telegramChatId
+          ?"Telegram configurado!"
+          :"Telegram ainda não configurado"}
+      </strong>
+
+      <p>
+        ${state.settings.telegramEnabled&&state.settings.telegramToken&&state.settings.telegramChatId
+          ?"Notificações de venda, violação e encerramento estão prontas."
+          :"Configure o bot para receber alertas no celular."}
+      </p>
+    </div>
+
+    <div class="telegram-alert-list">
+      <label><input id="telegram-enabled" type="checkbox" ${state.settings.telegramEnabled?"checked":""}> Ativar notificações</label>
+      <span>✔ Venda realizada</span>
+      <span>✔ Violação detectada</span>
+      <span>✔ Live iniciada</span>
+      <span>✔ Live encerrada</span>
+    </div>
+
+    <div class="telegram-config-fields">
+      <label>Token do Bot
+        <input id="telegram-token" type="password" value="${esc(state.settings.telegramToken)}" placeholder="123456789:AA...">
+      </label>
+
+      <label>Chat ID
+        <input id="telegram-chat" value="${esc(state.settings.telegramChatId)}" placeholder="123456789">
+      </label>
+    </div>
+
+    <div class="actions telegram-actions">
+      <button id="save-telegram" class="btn-primary">💾 Salvar configuração</button>
+      <button id="test-telegram" class="btn-secondary">🧪 Testar envio</button>
+    </div>
+
+    <details class="telegram-tutorial">
+      <summary>📖 Como configurar o Telegram</summary>
+      <div class="tutorial-content">
+        <p><strong>1.</strong> Procure por <code>@BotFather</code> e envie <code>/newbot</code>.</p>
+        <p><strong>2.</strong> Copie o Token fornecido pelo BotFather.</p>
+        <p><strong>3.</strong> Procure por <code>@userinfobot</code> e copie seu Chat ID.</p>
+        <p><strong>4.</strong> Abra o bot criado e envie uma mensagem como <code>Olá</code>.</p>
+        <p><strong>5.</strong> Preencha os campos acima e clique em Testar envio.</p>
+
+        <div class="actions">
+          <button id="download-cash-sound" class="btn-secondary" type="button">🔊 Baixar som de caixa registradora</button>
+          <button id="test-cash-sound" class="btn-secondary" type="button">▶ Ouvir som</button>
+        </div>
+
+        <p id="cash-sound-status" class="helper"></p>
+      </div>
+    </details>
+  `)}
+
+  ${section("protection","🛡️","Proteção da Live","encerra a live ao detectar aviso crítico",`
+    <div class="toggle-line protection-main-toggle">
+      <div>
+        <strong>Ativar proteção automática</strong>
+        <p class="helper">Monitora avisos críticos e age para proteger a transmissão.</p>
+      </div>
+      <input id="protection-enabled" class="toggle" type="checkbox" ${state.settings.protectionEnabled?"checked":""}>
+    </div>
+
+    <div class="protection-status-card ${state.settings.protectionEnabled?"armed":"inactive"}">
+      <strong>${state.settings.protectionEnabled?"🛡 PROTEÇÃO ARMADA":"⚪ PROTEÇÃO DESATIVADA"}</strong>
+      <p>${state.settings.protectionEnabled?"Nenhum aviso crítico detectado.":"Ative a proteção para monitorar a live."}</p>
+    </div>
+
+    <div class="toggle-line">
+      <div>
+        <strong>Enviar alerta no Telegram</strong>
+        <p class="helper">Usa a configuração do card Telegram acima.</p>
+      </div>
+      <input id="protection-telegram" class="toggle" type="checkbox" ${state.settings.protectionTelegram?"checked":""}>
+    </div>
+
+    <div class="actions protection-actions">
+      <button id="save-protection" class="btn-primary">💾 Salvar proteção</button>
+      <button id="test-protection" class="btn-secondary">🧪 Testar proteção</button>
+    </div>
+
+    <button id="end-live" class="danger-wide">Encerrar transmissão agora</button>
+
+    <p class="helper protection-explanation">
+      O intervalo de segurança entre ações é controlado automaticamente pelo sistema.
+    </p>
+
+    <div id="protection-events" class="event-list">
+      ${(state.protectionEvents||[]).slice(-6).reverse().map(event=>`<p>${esc(event.message||event.kind||"Evento de proteção")}</p>`).join("")||"<p>Nenhum evento de proteção.</p>"}
+    </div>
   `)}
 
   ${section("comments","🗨️","Comentários Automáticos","mensagens em intervalos aleatórios",`
@@ -583,6 +867,17 @@ function settings(){
     <p id="license-sync-status" class="helper"></p>
   `)}`}
 function bind(){
+
+  if(state.updateInfo){
+    document.querySelectorAll("button,input,textarea,select").forEach(element=>{
+      if(!element.closest(".mandatory-update-modal")){
+        element.disabled=true;
+      }
+    });
+    return;
+  }
+
+
   document.querySelectorAll("[data-collapse]").forEach(b=>b.onclick=async()=>{const id=b.dataset.collapse;state.collapse[id]=!(state.collapse[id]??false);await saveCollapse();render()});
   document.getElementById("scan")?.addEventListener("click",()=>post("ORION_FORCE_SCAN"));
   document.querySelectorAll("[data-time]").forEach(b=>b.onclick=()=>{document.getElementById("timer-minutes").value=b.dataset.time;document.querySelectorAll("[data-time]").forEach(x=>x.classList.remove("active"));b.classList.add("active")});
@@ -666,7 +961,7 @@ function bind(){
   document.getElementById("protection-save")?.addEventListener("click",async()=>{
     state.settings.protectionEnabled=document.getElementById("protection-enabled").checked;
     state.settings.protectionTelegram=document.getElementById("protection-telegram").checked;
-    state.settings.protectionCooldownSeconds=Math.max(30,+document.getElementById("protection-cooldown").value||120);
+    state.settings.protectionCooldownSeconds=120;
     await saveSettings();
     const message=document.getElementById("protection-msg");
     if(message)message.textContent=state.settings.protectionEnabled?"🛡️ Proteção automática armada.":"Proteção salva no modo somente aviso.";
@@ -895,3 +1190,14 @@ async function periodicLicenseValidation(){
   },15000);
 })();
 
+
+
+setInterval(async()=>{
+  const previous=state.updateInfo?.version||null;
+  await checkMandatoryUpdate();
+  const current=state.updateInfo?.version||null;
+
+  if(previous!==current){
+    render();
+  }
+},5*60*1000);

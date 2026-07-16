@@ -25,6 +25,7 @@ const state = {
   accounts: [],
   tickets: [],
   caktoEvents: [],
+  updates: [],
   pendingNewKeyAccount: null,
   page: "dashboard",
   loading: false,
@@ -140,17 +141,19 @@ async function loadData({ silent = false, render = true } = {}) {
   state.loading = true;
 
   try {
-    const [licenses, accounts, tickets, caktoEvents] = await Promise.all([
+    const [licenses, accounts, tickets, caktoEvents, updates] = await Promise.all([
       api("/api/admin/licenses"),
       api("/api/admin/accounts"),
       api("/api/admin/support"),
-      api("/api/admin/cakto-events")
+      api("/api/admin/cakto-events"),
+      api("/api/admin/updates")
     ]);
 
     state.licenses = licenses.licenses || [];
     state.accounts = accounts.accounts || [];
     state.tickets = tickets.tickets || [];
     state.caktoEvents = caktoEvents.events || [];
+    state.updates = updates.updates || [];
     elements.lastUpdate.textContent =
       `Atualizado às ${new Date().toLocaleTimeString("pt-BR")}`;
 
@@ -791,6 +794,115 @@ function caktoPage() {
   `;
 }
 
+
+function updateStatusHtml(update) {
+  return update.published
+    ? `<span class="status active">Publicada</span>`
+    : `<span class="status pending">Rascunho</span>`;
+}
+
+function updatesPage() {
+  pageMeta("Atualizações", "DISTRIBUIÇÃO DA EXTENSÃO");
+
+  elements.content.innerHTML = `
+    <section class="update-admin-grid">
+      <article class="card update-publish-card">
+        <div class="card-head">
+          <div>
+            <small>NOVA ATUALIZAÇÃO</small>
+            <h2>Publicar atualização obrigatória</h2>
+          </div>
+        </div>
+
+        <p class="muted">
+          O cliente será bloqueado até baixar e instalar a versão publicada.
+        </p>
+
+        <label>Versão
+          <input id="update-version" placeholder="1.4.1">
+        </label>
+
+        <label>Título
+          <input id="update-title" placeholder="Nova atualização disponível">
+        </label>
+
+        <label>Descrição
+          <textarea id="update-description" rows="3" placeholder="Resumo da atualização"></textarea>
+        </label>
+
+        <label>Novidades e correções
+          <textarea id="update-changelog" rows="8" placeholder="- Correção do timer&#10;- Melhoria no Telegram"></textarea>
+        </label>
+
+        <label>Arquivo ZIP da extensão
+          <input id="update-file" type="file" accept=".zip,application/zip">
+        </label>
+
+        <div class="update-mandatory-notice">
+          🔒 Toda atualização publicada é obrigatória.
+        </div>
+
+        <button id="publish-update" class="primary">
+          Publicar atualização
+        </button>
+
+        <p id="update-publish-message" class="message"></p>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <small>HISTÓRICO</small>
+            <h2>Versões publicadas</h2>
+          </div>
+        </div>
+
+        <div class="update-list">
+          ${state.updates.length
+            ? state.updates.map(update => `
+              <div class="update-row">
+                <div>
+                  <div class="update-row-title">
+                    <strong>v${escapeHtml(update.version)}</strong>
+                    ${updateStatusHtml(update)}
+                  </div>
+                  <h3>${escapeHtml(update.title)}</h3>
+                  <p>${escapeHtml(update.description || "Sem descrição.")}</p>
+                  <small>
+                    ${update.publishedAt ? `Publicada em ${date(update.publishedAt)}` : "Ainda não publicada"}
+                    · ${(Number(update.fileSize || 0) / 1024 / 1024).toFixed(2)} MB
+                  </small>
+                </div>
+
+                <div class="update-row-actions">
+                  <a class="button-link" href="${escapeHtml(update.downloadUrl)}" target="_blank">
+                    Baixar ZIP
+                  </a>
+
+                  <button
+                    class="toggle-update-publish"
+                    data-update-id="${escapeHtml(update.id)}"
+                    data-published="${update.published ? "1" : "0"}"
+                  >
+                    ${update.published ? "Despublicar" : "Publicar"}
+                  </button>
+
+                  <button
+                    class="delete-update danger"
+                    data-update-id="${escapeHtml(update.id)}"
+                  >
+                    Excluir
+                  </button>
+                </div>
+              </div>
+            `).join("")
+            : `<div class="empty-state">Nenhuma atualização cadastrada.</div>`}
+        </div>
+      </article>
+    </section>
+  `;
+}
+
 function renderPage() {
   if (!elements.content) return;
 
@@ -801,13 +913,105 @@ function renderPage() {
     finance: financePage,
     reports: reportsPage,
     support: supportPage,
-    cakto: caktoPage
+    cakto: caktoPage,
+    updates: updatesPage
   };
 
   (pages[state.page] || dashboardPage)();
 }
 
 elements.content.addEventListener("click", async event => {
+
+  const publishUpdateButton = event.target.closest("#publish-update");
+
+  if (publishUpdateButton) {
+    const message = document.getElementById("update-publish-message");
+    const file = document.getElementById("update-file")?.files?.[0];
+
+    try {
+      if (!file) throw new Error("Selecione o ZIP da extensão.");
+      if (file.size > 25 * 1024 * 1024) {
+        throw new Error("O ZIP deve ter no máximo 25 MB.");
+      }
+
+      publishUpdateButton.disabled = true;
+      publishUpdateButton.textContent = "Enviando atualização...";
+
+      const fileBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = () => {
+          const result = String(reader.result || "");
+          resolve(result.includes(",") ? result.split(",")[1] : result);
+        };
+
+        reader.onerror = () => reject(
+          new Error("Não foi possível ler o arquivo.")
+        );
+
+        reader.readAsDataURL(file);
+      });
+
+      await api("/api/admin/updates", {
+        method: "POST",
+        body: JSON.stringify({
+          version: document.getElementById("update-version").value,
+          title: document.getElementById("update-title").value,
+          description: document.getElementById("update-description").value,
+          changelog: document.getElementById("update-changelog").value,
+          fileBase64,
+          published: true
+        })
+      });
+
+      if (message) {
+        message.textContent =
+          "Atualização obrigatória publicada com sucesso.";
+      }
+
+      await loadData({ render: true });
+    } catch (error) {
+      if (message) message.textContent = error.message;
+    } finally {
+      publishUpdateButton.disabled = false;
+      publishUpdateButton.textContent = "Publicar atualização";
+    }
+
+    return;
+  }
+
+  const toggleUpdateButton = event.target.closest(".toggle-update-publish");
+
+  if (toggleUpdateButton) {
+    const action =
+      toggleUpdateButton.dataset.published === "1"
+        ? "unpublish"
+        : "publish";
+
+    await api(
+      `/api/admin/updates/${toggleUpdateButton.dataset.updateId}/${action}`,
+      { method: "POST" }
+    );
+
+    await loadData({ render: true });
+    return;
+  }
+
+  const deleteUpdateButton = event.target.closest(".delete-update");
+
+  if (deleteUpdateButton) {
+    if (!confirm("Excluir esta atualização e seu arquivo ZIP?")) return;
+
+    await api(
+      `/api/admin/updates/${deleteUpdateButton.dataset.updateId}`,
+      { method: "DELETE" }
+    );
+
+    await loadData({ render: true });
+    return;
+  }
+
+
   const createButton = event.target.closest(".create-key-for-account");
 
   if (createButton) {

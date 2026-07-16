@@ -19,15 +19,19 @@ window.OrionDetector = {
   debounce: null,
   lastViolationHash: "",
   lastProtectionAt: 0,
+  emergencyEndBusy: false,
+  emergencyWarningHash: "",
 
   start() {
     if (this.observer) return;
 
     this.scan();
 
-    this.observer = new MutationObserver(() => {
+    this.observer = new MutationObserver((mutations) => {
+      this.scanEmergencyWarnings(mutations);
+
       clearTimeout(this.debounce);
-      this.debounce = setTimeout(() => this.scan(), 250);
+      this.debounce = setTimeout(() => this.scan(), 120);
     });
 
     this.observer.observe(document.documentElement, {
@@ -45,6 +49,140 @@ window.OrionDetector = {
       }
       this.scanViolationOnly();
     }, 1000);
+  },
+
+
+  warningTextFromElement(element) {
+    if (!element || !(element instanceof Element)) return "";
+
+    return this.normalize(
+      element.innerText ||
+      element.textContent ||
+      element.getAttribute("aria-label") ||
+      element.getAttribute("title") ||
+      ""
+    );
+  },
+
+  isOfficialLiveWarning(element, text) {
+    if (!element || !this.isVisible(element) || !text) return false;
+
+    const normalized = text.toLowerCase();
+
+    const warningTerms =
+      /aviso|alerta|warning|viola[cç][aã]o|diretrizes|pol[ií]tica|restri[cç][aã]o|penalidade|suspens[aã]o|conte[uú]do inadequado|direitos autorais|copyright|risco|transmiss[aã]o pode ser encerrada|live pode ser encerrada|conta pode ser penalizada/i;
+
+    const officialContainer = Boolean(
+      element.matches?.(
+        '[role="alert"],[role="alertdialog"],[aria-live="assertive"],[class*="warning" i],[class*="violation" i],[class*="risk" i],[class*="notice" i],[class*="toast" i]'
+      ) ||
+      element.closest?.(
+        '[role="alert"],[role="alertdialog"],[aria-live="assertive"],[class*="warning" i],[class*="violation" i],[class*="risk" i],[class*="notice" i],[class*="toast" i]'
+      )
+    );
+
+    return officialContainer && warningTerms.test(normalized);
+  },
+
+  scanEmergencyWarnings(mutations = []) {
+    const candidates = new Set();
+
+    for (const mutation of mutations) {
+      if (mutation.target instanceof Element) {
+        candidates.add(mutation.target);
+      }
+
+      for (const node of mutation.addedNodes || []) {
+        if (node instanceof Element) {
+          candidates.add(node);
+
+          node.querySelectorAll?.(
+            '[role="alert"],[role="alertdialog"],[aria-live="assertive"],[class*="warning" i],[class*="violation" i],[class*="risk" i],[class*="notice" i],[class*="toast" i]'
+          ).forEach(element => candidates.add(element));
+        }
+      }
+    }
+
+    if (!candidates.size) {
+      document.querySelectorAll(
+        '[role="alert"],[role="alertdialog"],[aria-live="assertive"],[class*="warning" i],[class*="violation" i],[class*="risk" i],[class*="notice" i],[class*="toast" i]'
+      ).forEach(element => candidates.add(element));
+    }
+
+    for (const element of candidates) {
+      const scope =
+        element.closest?.(
+          '[role="alert"],[role="alertdialog"],[aria-live="assertive"],[class*="warning" i],[class*="violation" i],[class*="risk" i],[class*="notice" i],[class*="toast" i]'
+        ) || element;
+
+      const text = this.warningTextFromElement(scope);
+
+      if (!this.isOfficialLiveWarning(scope, text)) continue;
+
+      const hash = text.toLowerCase().slice(0, 300);
+
+      if (
+        hash === this.emergencyWarningHash &&
+        this.emergencyEndBusy
+      ) {
+        continue;
+      }
+
+      this.emergencyWarningHash = hash;
+
+      this.endLiveImmediately({
+        reason: "warning",
+        warningText: text
+      }).catch(console.error);
+
+      return;
+    }
+  },
+
+  async endLiveImmediately({
+    reason = "warning",
+    warningText = ""
+  } = {}) {
+    if (this.emergencyEndBusy) {
+      return {
+        ok: false,
+        busy: true,
+        error: "Encerramento já está em andamento."
+      };
+    }
+
+    this.emergencyEndBusy = true;
+    this.state.protectionStatus = "ending";
+    this.publish();
+
+    try {
+      const result = await this.endLive({
+        dryRun: false,
+        reason
+      });
+
+      this.state.protectionStatus =
+        result.ok ? "ended" : "failed";
+
+      this.publish();
+
+      chrome.runtime.sendMessage({
+        type: "ORION_PROTECTION_EVENT",
+        payload: {
+          kind: result.ok
+            ? "immediate-end-success"
+            : "immediate-end-failed",
+          reason,
+          warningText: warningText.slice(0, 500),
+          result,
+          createdAt: new Date().toISOString()
+        }
+      }).catch(() => {});
+
+      return result;
+    } finally {
+      this.emergencyEndBusy = false;
+    }
   },
 
   normalize(value) {
@@ -577,14 +715,7 @@ window.OrionDetector = {
       ...(data[ORION.STORAGE.SETTINGS] || {})
     };
 
-    const cooldownMs = Math.max(
-      30,
-      Number(settings.protectionCooldownSeconds) || 120
-    ) * 1000;
-
-    if (Date.now() - this.lastProtectionAt < cooldownMs) return;
-
-    this.lastProtectionAt = Date.now();
+    // Avisos encerram a LIVE imediatamente, sem cooldown.
 
     chrome.runtime.sendMessage({
       type: "ORION_NOTIFY",
@@ -622,12 +753,13 @@ window.OrionDetector = {
       }
     }).catch(() => {});
 
-    if (!settings.protectionEnabled) return;
-
     this.state.protectionStatus = "ending";
     this.publish();
 
-    const result = await this.endLive({ dryRun: false });
+    const result = await this.endLiveImmediately({
+      reason: "warning",
+      warningText: violation.text
+    });
 
     this.state.protectionStatus = result.ok ? "ended" : "failed";
     this.publish();
@@ -726,13 +858,26 @@ window.OrionDetector = {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
   },
 
-  async endLive({ dryRun = false } = {}) {
-    const initial = this.findEndLiveButton();
+  async endLive({
+    dryRun = false,
+    reason = "manual"
+  } = {}) {
+    const initialDeadline = Date.now() + 5000;
+    let initial = null;
+
+    while (Date.now() < initialDeadline && !initial) {
+      initial = this.findEndLiveButton();
+
+      if (!initial) {
+        await this.wait(25);
+      }
+    }
 
     if (!initial) {
       return {
         ok: false,
         dryRun,
+        reason,
         stage: "initial-button",
         error: "Botão de encerramento da LIVE não foi localizado."
       };
@@ -742,34 +887,53 @@ window.OrionDetector = {
       return {
         ok: true,
         dryRun: true,
+        reason,
         stage: "initial-button",
         buttonText: initial.text
       };
     }
 
     initial.element.click();
-    await this.wait(650);
 
-    const confirmation = this.findConfirmEndButton();
+    let confirmation = null;
+    const confirmationDeadline = Date.now() + 3000;
 
-    if (confirmation) {
-      confirmation.element.click();
-      await this.wait(450);
+    while (Date.now() < confirmationDeadline) {
+      confirmation = this.findConfirmEndButton();
 
-      return {
-        ok: true,
-        stage: "confirmed",
-        initialButton: initial.text,
-        confirmationButton: confirmation.text
-      };
+      if (confirmation) {
+        confirmation.element.click();
+
+        return {
+          ok: true,
+          reason,
+          stage: "confirmed",
+          initialButton: initial.text,
+          confirmationButton: confirmation.text,
+          completedAt: new Date().toISOString()
+        };
+      }
+
+      const retryInitial = this.findEndLiveButton();
+
+      if (
+        retryInitial &&
+        Date.now() + 100 < confirmationDeadline
+      ) {
+        retryInitial.element.click();
+      }
+
+      await this.wait(25);
     }
 
-    // Algumas versões encerram diretamente sem segunda confirmação.
     return {
       ok: true,
+      reason,
       stage: "initial-click",
       initialButton: initial.text,
-      warning: "Nenhum segundo botão de confirmação foi encontrado."
+      warning:
+        "A interface não exibiu um segundo botão de confirmação.",
+      completedAt: new Date().toISOString()
     };
   },
 

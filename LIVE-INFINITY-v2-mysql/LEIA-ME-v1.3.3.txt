@@ -1,0 +1,8 @@
+LIVE INFINITY v1.3.3
+
+- A extensão gera uma impressão segura e estável do computador.
+- Reinstalar a extensão no mesmo computador não exige nova chave.
+- O novo ID de instalação é vinculado automaticamente quando o computador é reconhecido.
+- Outro computador continua bloqueado.
+- Chaves antigas, sem impressão salva, exigem uma única liberação de PC no Admin.
+- Depois dessa liberação, as próximas reinstalações funcionam automaticamente.

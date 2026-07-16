@@ -1,0 +1,8 @@
+LIVE INFINITY v1.3.4
+
+- Telegram agora fica em um card exclusivo.
+- Proteção da Live agora fica em outro card exclusivo.
+- Timer continua separado em seu próprio card.
+- Campo técnico de 120 segundos foi removido da interface.
+- Intervalo de segurança permanece fixo internamente.
+- Botões e descrições foram renomeados para linguagem mais clara.

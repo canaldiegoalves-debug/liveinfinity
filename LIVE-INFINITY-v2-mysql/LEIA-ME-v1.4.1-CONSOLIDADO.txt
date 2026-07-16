@@ -1,0 +1,29 @@
+LIVE INFINITY v1.4.1 — PACOTE COMPLETO CONSOLIDADO
+
+Contém todas as atualizações anteriores:
+
+- Atualizações obrigatórias publicadas pelo Admin.
+- Download da nova versão dentro da extensão.
+- Timer profissional: iniciar, pausar, continuar e cancelar.
+- Timer encerra a LIVE exatamente ao zerar.
+- Aviso oficial detectado encerra a LIVE imediatamente.
+- Encerramento por aviso não possui cooldown.
+- Botões Encerrar e Confirmar procurados em ciclos de 25 ms.
+- Bloqueio absoluto de cupom, voucher e desconto.
+- Somente o produto principal pode ser fixado.
+- Comentários realmente aleatórios.
+- O mesmo comentário não repete consecutivamente.
+- Um agradecimento por venda.
+- Nome real do comprador.
+- Vendas e GMV atualizados.
+- Telegram com tutorial e som de caixa.
+- Telegram, proteção e timer separados.
+- IA e vídeos liberados em Pro e Premium.
+- Básico permanece bloqueado nos recursos avançados.
+- Plano do servidor sincronizado com a extensão.
+- Reinstalação no mesmo computador sem nova chave.
+- Todas as migrações de banco executadas pelo servidor.
+
+Versões:
+- Servidor: 2.4.1
+- Extensão: 1.4.1

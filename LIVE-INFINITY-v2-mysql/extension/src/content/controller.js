@@ -10,11 +10,13 @@ const OrionContentAutomation = {
   seenSales: new Set(),
   previousLiveState: false,
   endTimerBusy: false,
+  exactEndTimer: null,
   completedEndTimerAt: null,
 
   async init() {
     await this.loadSettings();
     this.applySettings();
+    this.configureExactEndTimer();
 
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
@@ -26,6 +28,7 @@ const OrionContentAutomation = {
       };
 
       this.applySettings();
+      this.configureExactEndTimer();
     });
 
     setInterval(() => {
@@ -188,12 +191,32 @@ const OrionContentAutomation = {
   },
 
 
-  async handleEndTimer() {
+
+  configureExactEndTimer() {
+    clearTimeout(this.exactEndTimer);
+    this.exactEndTimer = null;
+
+    if (this.settings.endTimerPaused) return;
+
+    const endTimerAt = Number(this.settings.endTimerAt || 0);
+    if (!endTimerAt) return;
+
+    const delay = Math.max(0, endTimerAt - Date.now());
+
+    this.exactEndTimer = setTimeout(() => {
+      this.handleEndTimer({
+        force: true,
+        reason: "timer-zero"
+      }).catch(console.error);
+    }, delay);
+  },
+
+  async handleEndTimer({ force = false, reason = "timer-zero" } = {}) {
     const endTimerAt = Number(this.settings.endTimerAt || 0);
 
     if (this.settings.endTimerPaused) return;
     if (!endTimerAt) return;
-    if (Date.now() < endTimerAt) return;
+    if (!force && Date.now() < endTimerAt) return;
     if (this.endTimerBusy) return;
     if (this.completedEndTimerAt === endTimerAt) return;
 
@@ -208,8 +231,10 @@ const OrionContentAutomation = {
       this.autoPinTimer = null;
       this.autoPinBusy = false;
 
-      const result = await OrionDetector.endLive({ dryRun: false });
+      const result = await OrionDetector.endLive({ dryRun: false, reason });
 
+      clearTimeout(this.exactEndTimer);
+      this.exactEndTimer = null;
       this.settings.endTimerAt = null;
       this.settings.endTimerPaused = false;
       this.settings.endTimerRemainingMs = null;
@@ -228,6 +253,7 @@ const OrionContentAutomation = {
           kind: result.ok ? "timer-live-ended" : "timer-live-end-failed",
           result,
           scheduledAt: endTimerAt,
+          reason,
           createdAt: new Date().toISOString()
         }
       }).catch(() => {});

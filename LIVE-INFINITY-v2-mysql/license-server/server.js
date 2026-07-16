@@ -12,6 +12,8 @@ const HOST = process.env.HOST || "127.0.0.1";
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const PUBLIC_DIR = path.join(__dirname, "public");
+const UPDATES_DIR = path.join(__dirname, "updates");
+fs.mkdirSync(UPDATES_DIR, { recursive: true });
 
 const CAKTO_CAPTURE_ONLY =
   String(process.env.CAKTO_CAPTURE_ONLY || "true").toLowerCase() !== "false";
@@ -181,6 +183,88 @@ async function accountKeyUsage(email) {
 
 
 
+
+function sanitizeVersion(value) {
+  const version = String(value || "").trim().replace(/^v/i, "");
+  return /^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i.test(version)
+    ? version
+    : null;
+}
+
+function compareVersions(left, right) {
+  const a = String(left || "0.0.0").split("-")[0].split(".").map(Number);
+  const b = String(right || "0.0.0").split("-")[0].split(".").map(Number);
+
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (a[index] || 0) - (b[index] || 0);
+    if (difference !== 0) return difference;
+  }
+
+  return 0;
+}
+
+function safeUpdateFileName(version) {
+  return `live-infinity-${String(version).replace(/[^a-z0-9.-]/gi, "-")}.zip`;
+}
+
+async function ensureUpdatesTable() {
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS extension_updates (
+      id CHAR(36) PRIMARY KEY,
+      version VARCHAR(40) NOT NULL UNIQUE,
+      title VARCHAR(255) NOT NULL,
+      description TEXT NULL,
+      changelog TEXT NULL,
+      file_name VARCHAR(255) NOT NULL,
+      file_size BIGINT NOT NULL DEFAULT 0,
+      mandatory TINYINT(1) NOT NULL DEFAULT 1,
+      published TINYINT(1) NOT NULL DEFAULT 0,
+      published_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_extension_updates_published (published,published_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+  );
+}
+
+function rowToUpdate(row, request = null) {
+  if (!row) return null;
+
+  const host = request?.headers?.host || "";
+  const protocol = String(request?.headers?.["x-forwarded-proto"] || "https")
+    .split(",")[0]
+    .trim();
+
+  return {
+    id: row.id,
+    version: row.version,
+    title: row.title,
+    description: row.description || "",
+    changelog: row.changelog || "",
+    mandatory: Boolean(row.mandatory),
+    published: Boolean(row.published),
+    fileSize: Number(row.file_size || 0),
+    publishedAt: toIso(row.published_at),
+    createdAt: toIso(row.created_at),
+    downloadUrl: host
+      ? `${protocol}://${host}/api/updates/download/${encodeURIComponent(row.id)}`
+      : `/api/updates/download/${encodeURIComponent(row.id)}`
+  };
+}
+
+async function latestPublishedUpdate(request = null) {
+  const [rows] = await pool.execute(
+    `SELECT *
+     FROM extension_updates
+     WHERE published=1
+     ORDER BY published_at DESC,created_at DESC
+     LIMIT 1`
+  );
+
+  return rowToUpdate(rows[0] || null, request);
+}
+
+
 function json(response, status, payload) {
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -319,13 +403,27 @@ function rowToLicense(row) {
 
 async function findLicenseByKey(key) {
   const [rows] = await pool.execute(
-    "SELECT * FROM licenses WHERE license_key = ? LIMIT 1",
+    `SELECT
+       l.*,
+       COALESCE(a.plan,l.plan) AS resolved_plan
+     FROM licenses l
+     LEFT JOIN customer_accounts a
+       ON a.email=COALESCE(l.account_email,l.email)
+     WHERE l.license_key=?
+     LIMIT 1`,
     [key]
   );
-  return rows[0] || null;
+
+  const row = rows[0] || null;
+
+  if (row?.resolved_plan) {
+    row.plan = normalizePlan(row.resolved_plan);
+  }
+
+  return row;
 }
 
-function validateLicenseRecord(row, email, key, deviceId) {
+function validateLicenseRecord(row, email, key, deviceId, deviceFingerprint) {
   if (!row) return { ok: false, error: "Chave não encontrada." };
   if (!row.active || row.status === "revoked") {
     return { ok: false, error: "Esta licença foi bloqueada." };
@@ -337,7 +435,20 @@ function validateLicenseRecord(row, email, key, deviceId) {
     return { ok: false, error: "Chave inválida." };
   }
   if (row.device_id && deviceId && row.device_id !== deviceId) {
-    return { ok: false, error: "Esta chave já está vinculada a outro dispositivo." };
+    const sameComputer =
+      row.device_fingerprint &&
+      deviceFingerprint &&
+      safeEqual(row.device_fingerprint, deviceFingerprint);
+
+    if (!sameComputer) {
+      return {
+        ok: false,
+        error: row.device_fingerprint
+          ? "Esta chave já está vinculada a outro computador."
+          : "Ativação antiga detectada. Libere o PC uma única vez no painel administrativo e tente novamente.",
+        legacyDeviceBinding: !row.device_fingerprint
+      };
+    }
   }
   if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) {
     return { ok: false, error: "A licença expirou.", expired: true };
@@ -378,6 +489,29 @@ function serveStatic(requestPath, response) {
   };
 
   text(response, 200, fs.readFileSync(filePath), types[extension] || "application/octet-stream");
+}
+
+
+async function ensureDeviceFingerprintColumn() {
+  const [columns] = await pool.query(
+    "SHOW COLUMNS FROM licenses LIKE 'device_fingerprint'"
+  );
+
+  if (!columns.length) {
+    await pool.query(
+      "ALTER TABLE licenses ADD COLUMN device_fingerprint VARCHAR(64) NULL AFTER device_id"
+    );
+  }
+
+  const [indexes] = await pool.query(
+    "SHOW INDEX FROM licenses WHERE Key_name='idx_licenses_device_fingerprint'"
+  );
+
+  if (!indexes.length) {
+    await pool.query(
+      "CREATE INDEX idx_licenses_device_fingerprint ON licenses(device_fingerprint)"
+    );
+  }
 }
 
 const server = http.createServer(async (request, response) => {
@@ -470,6 +604,77 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+
+    if (url.pathname === "/api/updates/latest" && request.method === "GET") {
+      const currentVersion = sanitizeVersion(
+        url.searchParams.get("currentVersion")
+      ) || "0.0.0";
+
+      const update = await latestPublishedUpdate(request);
+
+      json(response, 200, {
+        ok: true,
+        currentVersion,
+        update,
+        updateRequired: Boolean(
+          update && compareVersions(update.version, currentVersion) > 0
+        ),
+        mandatory: Boolean(
+          update &&
+          update.mandatory &&
+          compareVersions(update.version, currentVersion) > 0
+        )
+      });
+      return;
+    }
+
+    const updateDownloadMatch = url.pathname.match(
+      /^\/api\/updates\/download\/([^/]+)$/
+    );
+
+    if (updateDownloadMatch && request.method === "GET") {
+      const id = decodeURIComponent(updateDownloadMatch[1]);
+      const [rows] = await pool.execute(
+        `SELECT *
+         FROM extension_updates
+         WHERE id=? AND published=1
+         LIMIT 1`,
+        [id]
+      );
+
+      const update = rows[0];
+
+      if (!update) {
+        json(response, 404, {
+          ok: false,
+          error: "Atualização não encontrada."
+        });
+        return;
+      }
+
+      const filePath = path.join(UPDATES_DIR, update.file_name);
+
+      if (!fs.existsSync(filePath)) {
+        json(response, 404, {
+          ok: false,
+          error: "Arquivo da atualização não encontrado."
+        });
+        return;
+      }
+
+      response.writeHead(200, {
+        "Content-Type": "application/zip",
+        "Content-Disposition":
+          `attachment; filename="${safeUpdateFileName(update.version)}"`,
+        "Content-Length": fs.statSync(filePath).size,
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff"
+      });
+
+      fs.createReadStream(filePath).pipe(response);
+      return;
+    }
+
     if (url.pathname === "/api/health" && request.method === "GET") {
       await pool.query("SELECT 1");
       json(response, 200, {
@@ -503,17 +708,24 @@ const server = http.createServer(async (request, response) => {
       const email = normalizeEmail(body.email);
       const key = String(body.key || "").trim().toUpperCase();
       const deviceId = String(body.deviceId || "").trim();
+      const deviceFingerprint = String(body.deviceFingerprint || "").trim().toLowerCase();
 
-      if (!email || !email.includes("@") || !key || !deviceId) {
+      if (
+        !email ||
+        !email.includes("@") ||
+        !key ||
+        !deviceId ||
+        !/^[a-f0-9]{64}$/.test(deviceFingerprint)
+      ) {
         json(response, 400, {
           ok: false,
-          error: "E-mail, chave e identificação do dispositivo são obrigatórios."
+          error: "E-mail, chave e identificação segura do computador são obrigatórios."
         });
         return;
       }
 
       const row = await findLicenseByKey(key);
-      const validation = validateLicenseRecord(row, email, key, deviceId);
+      const validation = validateLicenseRecord(row, email, key, deviceId, deviceFingerprint);
 
       if (!validation.ok && row?.activated_at) {
         await logEvent(request, "license_activation_failed", row?.id, email, { error: validation.error });
@@ -530,27 +742,61 @@ const server = http.createServer(async (request, response) => {
         const expiresAt = new Date(Date.now() + Number(row.duration_days) * 86_400_000);
         await pool.execute(
           `UPDATE licenses
-           SET activated_at=NOW(),expires_at=?,status='active',device_id=?,last_validation_at=NOW()
+           SET activated_at=NOW(),
+               expires_at=?,
+               status='active',
+               device_id=?,
+               device_fingerprint=?,
+               last_validation_at=NOW()
            WHERE id=?`,
-          [expiresAt, deviceId, row.id]
+          [expiresAt, deviceId, deviceFingerprint, row.id]
         );
         await logEvent(request, "license_activated", row.id, email, { deviceId });
       } else {
+        const sameComputerReinstall =
+          row.device_id &&
+          row.device_id !== deviceId &&
+          row.device_fingerprint &&
+          safeEqual(row.device_fingerprint, deviceFingerprint);
+
         await pool.execute(
-          "UPDATE licenses SET last_validation_at=NOW() WHERE id=?",
-          [row.id]
+          `UPDATE licenses
+           SET device_id=?,
+               device_fingerprint=COALESCE(device_fingerprint,?),
+               last_validation_at=NOW()
+           WHERE id=?`,
+          [
+            sameComputerReinstall ? deviceId : row.device_id || deviceId,
+            deviceFingerprint,
+            row.id
+          ]
         );
+
+        if (sameComputerReinstall) {
+          await logEvent(
+            request,
+            "license_reinstalled_same_computer",
+            row.id,
+            email,
+            { previousDeviceId: row.device_id, newDeviceId: deviceId }
+          );
+        }
       }
 
       const updated = await findLicenseByKey(key);
-      const finalValidation = validateLicenseRecord(updated, email, key, deviceId);
+      const finalValidation = validateLicenseRecord(updated, email, key, deviceId, deviceFingerprint);
 
       if (!finalValidation.ok) {
         json(response, 403, finalValidation);
         return;
       }
 
-      json(response, 200, { ok: true, license: rowToLicense(updated) });
+      json(response, 200, {
+        ok: true,
+        plan: normalizePlan(updated.plan),
+        accountPlan: normalizePlan(updated.plan),
+        license: rowToLicense(updated)
+      });
       return;
     }
 
@@ -559,9 +805,24 @@ const server = http.createServer(async (request, response) => {
       const email = normalizeEmail(body.email);
       const key = String(body.key || "").trim().toUpperCase();
       const deviceId = String(body.deviceId || "").trim();
+      const deviceFingerprint = String(body.deviceFingerprint || "").trim().toLowerCase();
+
+      if (!/^[a-f0-9]{64}$/.test(deviceFingerprint)) {
+        json(response, 400, {
+          ok: false,
+          error: "Identificação segura do computador ausente."
+        });
+        return;
+      }
 
       const row = await findLicenseByKey(key);
-      const validation = validateLicenseRecord(row, email, key, deviceId);
+      const validation = validateLicenseRecord(
+        row,
+        email,
+        key,
+        deviceId,
+        deviceFingerprint
+      );
 
       if (!validation.ok) {
         await logEvent(request, "license_validation_failed", row?.id, email, { error: validation.error });
@@ -569,13 +830,42 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
+      const sameComputerReinstall =
+        row.device_id &&
+        row.device_id !== deviceId &&
+        row.device_fingerprint &&
+        safeEqual(row.device_fingerprint, deviceFingerprint);
+
       await pool.execute(
-        "UPDATE licenses SET last_validation_at=NOW() WHERE id=?",
-        [row.id]
+        `UPDATE licenses
+         SET device_id=?,
+             device_fingerprint=COALESCE(device_fingerprint,?),
+             last_validation_at=NOW()
+         WHERE id=?`,
+        [
+          sameComputerReinstall ? deviceId : row.device_id || deviceId,
+          deviceFingerprint,
+          row.id
+        ]
       );
 
+      if (sameComputerReinstall) {
+        await logEvent(
+          request,
+          "license_reinstalled_same_computer",
+          row.id,
+          email,
+          { previousDeviceId: row.device_id, newDeviceId: deviceId }
+        );
+      }
+
       const updated = await findLicenseByKey(key);
-      json(response, 200, { ok: true, license: rowToLicense(updated) });
+      json(response, 200, {
+        ok: true,
+        plan: normalizePlan(updated.plan),
+        accountPlan: normalizePlan(updated.plan),
+        license: rowToLicense(updated)
+      });
       return;
     }
 
@@ -758,6 +1048,169 @@ const server = http.createServer(async (request, response) => {
           }))
         });
         return;
+      }
+
+
+      if (url.pathname === "/api/admin/updates" && request.method === "GET") {
+        const [rows] = await pool.execute(
+          `SELECT *
+           FROM extension_updates
+           ORDER BY created_at DESC`
+        );
+
+        json(response, 200, {
+          ok: true,
+          updates: rows.map(row => rowToUpdate(row, request))
+        });
+        return;
+      }
+
+      if (url.pathname === "/api/admin/updates" && request.method === "POST") {
+        const body = await readBody(request);
+        const version = sanitizeVersion(body.version);
+
+        if (!version) {
+          json(response, 400, {
+            ok: false,
+            error: "Versão inválida. Use o formato 1.4.0."
+          });
+          return;
+        }
+
+        const encodedFile = String(body.fileBase64 || "");
+        const zipBuffer = Buffer.from(encodedFile, "base64");
+
+        if (
+          !encodedFile ||
+          zipBuffer.length < 4 ||
+          zipBuffer[0] !== 0x50 ||
+          zipBuffer[1] !== 0x4b
+        ) {
+          json(response, 400, {
+            ok: false,
+            error: "Selecione um arquivo ZIP válido."
+          });
+          return;
+        }
+
+        if (zipBuffer.length > 25 * 1024 * 1024) {
+          json(response, 413, {
+            ok: false,
+            error: "O ZIP deve ter no máximo 25 MB."
+          });
+          return;
+        }
+
+        const id = crypto.randomUUID();
+        const fileName = `${id}.zip`;
+        const filePath = path.join(UPDATES_DIR, fileName);
+
+        fs.writeFileSync(filePath, zipBuffer);
+
+        try {
+          await pool.execute(
+            `INSERT INTO extension_updates (
+              id,version,title,description,changelog,file_name,file_size,
+              mandatory,published,published_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+            [
+              id,
+              version,
+              String(body.title || `Live Infinity ${version}`).trim(),
+              String(body.description || "").trim(),
+              String(body.changelog || "").trim(),
+              fileName,
+              zipBuffer.length,
+              1,
+              body.published === false ? 0 : 1,
+              body.published === false ? null : new Date()
+            ]
+          );
+        } catch (error) {
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+          if (error.code === "ER_DUP_ENTRY") {
+            json(response, 409, {
+              ok: false,
+              error: "Já existe uma atualização com esta versão."
+            });
+            return;
+          }
+
+          throw error;
+        }
+
+        json(response, 201, {
+          ok: true,
+          update: rowToUpdate({
+            id,
+            version,
+            title: String(body.title || `Live Infinity ${version}`).trim(),
+            description: String(body.description || "").trim(),
+            changelog: String(body.changelog || "").trim(),
+            file_name: fileName,
+            file_size: zipBuffer.length,
+            mandatory: 1,
+            published: body.published === false ? 0 : 1,
+            published_at: body.published === false ? null : new Date(),
+            created_at: new Date()
+          }, request)
+        });
+        return;
+      }
+
+      const adminUpdateMatch = url.pathname.match(
+        /^\/api\/admin\/updates\/([^/]+)(?:\/(publish|unpublish))?$/
+      );
+
+      if (adminUpdateMatch) {
+        const id = decodeURIComponent(adminUpdateMatch[1]);
+        const action = adminUpdateMatch[2];
+
+        const [rows] = await pool.execute(
+          "SELECT * FROM extension_updates WHERE id=? LIMIT 1",
+          [id]
+        );
+
+        const update = rows[0];
+
+        if (!update) {
+          json(response, 404, {
+            ok: false,
+            error: "Atualização não encontrada."
+          });
+          return;
+        }
+
+        if (!action && request.method === "DELETE") {
+          await pool.execute(
+            "DELETE FROM extension_updates WHERE id=?",
+            [id]
+          );
+
+          const filePath = path.join(UPDATES_DIR, update.file_name);
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+          json(response, 200, { ok: true });
+          return;
+        }
+
+        if (
+          (action === "publish" || action === "unpublish") &&
+          request.method === "POST"
+        ) {
+          const published = action === "publish" ? 1 : 0;
+
+          await pool.execute(
+            `UPDATE extension_updates
+             SET published=?,published_at=?
+             WHERE id=?`,
+            [published, published ? new Date() : null, id]
+          );
+
+          json(response, 200, { ok: true });
+          return;
+        }
       }
 
       if (url.pathname === "/api/admin/licenses" && request.method === "GET") {
@@ -947,7 +1400,7 @@ const server = http.createServer(async (request, response) => {
 
         await pool.execute(
           `UPDATE licenses
-           SET device_id=NULL,device_name=NULL,last_validation_at=NULL
+           SET device_id=NULL,device_name=NULL,device_fingerprint=NULL,last_validation_at=NULL
            WHERE id=?`,
           [id]
         );
@@ -1083,7 +1536,7 @@ const licenseMatch = url.pathname.match(
 
         if (action === "reset-device" && request.method === "POST") {
           await pool.execute(
-            "UPDATE licenses SET device_id=NULL WHERE id=?",
+            "UPDATE licenses SET device_id=NULL,device_fingerprint=NULL WHERE id=?",
             [id]
           );
           json(response, 200, { ok: true });
@@ -1115,6 +1568,8 @@ const licenseMatch = url.pathname.match(
   }
 
   await testConnection();
+  await ensureDeviceFingerprintColumn();
+  await ensureUpdatesTable();
 
   server.listen(PORT, HOST, () => {
     console.log(`Live Infinity v2: http://${HOST}:${PORT}`);

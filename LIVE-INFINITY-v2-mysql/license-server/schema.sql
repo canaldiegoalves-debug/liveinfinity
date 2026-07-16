@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS licenses (
   active TINYINT(1) NOT NULL DEFAULT 1,
   status ENUM('pending','active','revoked','expired') NOT NULL DEFAULT 'pending',
   device_id VARCHAR(255) NULL,
+  device_fingerprint VARCHAR(64) NULL,
   note TEXT NULL,
   amount_paid DECIMAL(10,2) NOT NULL DEFAULT 0,
   payment_method VARCHAR(80) NULL,
@@ -65,4 +66,21 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   INDEX idx_logs_event (event_type),
   INDEX idx_logs_license (license_id),
   INDEX idx_logs_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+CREATE TABLE IF NOT EXISTS extension_updates (
+  id CHAR(36) PRIMARY KEY,
+  version VARCHAR(40) NOT NULL UNIQUE,
+  title VARCHAR(255) NOT NULL,
+  description TEXT NULL,
+  changelog TEXT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  file_size BIGINT NOT NULL DEFAULT 0,
+  mandatory TINYINT(1) NOT NULL DEFAULT 1,
+  published TINYINT(1) NOT NULL DEFAULT 0,
+  published_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_extension_updates_published (published,published_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

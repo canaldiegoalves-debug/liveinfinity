@@ -1,0 +1,18 @@
+LIVE INFINITY v1.4.0 — ATUALIZAÇÕES OBRIGATÓRIAS
+
+Inclui todas as correções anteriores e adiciona:
+
+- Novo menu Atualizações no Admin.
+- Upload do ZIP pelo próprio painel.
+- Versão, título, descrição e changelog.
+- Histórico de versões publicadas.
+- Download servido pelo próprio servidor.
+- Verificação automática ao abrir a extensão.
+- Modal obrigatório sem botão para fechar.
+- Interface bloqueada enquanto houver atualização pendente.
+- Tutorial de substituição da extensão.
+- Atualizações verificadas novamente a cada 5 minutos.
+
+Versões:
+- Servidor: 2.4.0
+- Extensão: 1.4.0
