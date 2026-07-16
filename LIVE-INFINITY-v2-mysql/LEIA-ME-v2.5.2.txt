@@ -1,0 +1,16 @@
+LIVE INFINITY v2.5.2
+
+- Corrigido salvamento do Telegram.
+- Token, Chat ID e ativação persistem.
+- Testar conexão salva configuração válida.
+- Painel Admin movido para caminho protegido.
+- Caminho padrão: /painel-seguro-liveinfinity
+- Configure outro caminho no .env com ADMIN_PANEL_PATH.
+- APIs Admin retornam 403 sem token administrativo.
+- Login Admin limitado contra tentativas repetidas.
+- Aba Atualizações garantida no Admin.
+- Upload, histórico, publicação e download de ZIP.
+- Todas as correções anteriores mantidas.
+
+Servidor: 2.5.2
+Extensão: 2.5.2

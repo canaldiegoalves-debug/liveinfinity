@@ -466,7 +466,7 @@ function login(){
   </header>
   <section id="orion-login-form" class="login">
     <h1>Ativar extensão</h1>
-    <p>Digite o e-mail cadastrado e a chave gerada no painel Admin.</p>
+    <p>Digite o e-mail cadastrado e a sua chave de acesso.</p>
 
     <label>E-mail</label>
     <input id="email" type="email">
@@ -723,6 +723,11 @@ function home(){
       <button id="save-telegram" class="btn-primary">💾 Salvar configuração</button>
       <button id="test-telegram" class="btn-secondary">🧪 Testar envio</button>
     </div>
+    <p id="telegram-save-status" class="helper">
+      ${state.settings.telegramToken&&state.settings.telegramChatId
+        ?"Configuração salva neste computador."
+        :"Preencha os campos e clique em Salvar configuração."}
+    </p>
 
     <details class="telegram-tutorial">
       <summary>📖 Como configurar o Telegram</summary>
@@ -843,7 +848,7 @@ function settings(){
       )
     );
 
-  return`<div class="title"><small>CONFIGURAÇÕES</small><h2>Conta</h2></div>${section("account","⚙️","Licença e conta","dados sincronizados com o Admin",`
+  return`<div class="title"><small>CONFIGURAÇÕES</small><h2>Conta</h2></div>${section("account","⚙️","Licença e conta","dados sincronizados com o servidor",`
     <p>${esc(state.license.email)}</p>
     <p class="helper">
       Plano ${state.license.plan.toUpperCase()} ·
@@ -1112,8 +1117,87 @@ function bind(){
   });
 
   document.getElementById("comments-stop")?.addEventListener("click",async()=>{clearTimeout(state.commentTimer);state.commentTimer=null;state.settings.commentsEnabled=false;await saveSettings();const event=document.getElementById("comments-status");if(event)event.textContent="Comentários automáticos parados."});
-  document.getElementById("tg-save")?.addEventListener("click",async()=>{state.settings.telegramEnabled=document.getElementById("tg-enabled").checked;state.settings.telegramToken=document.getElementById("tg-token").value.trim();state.settings.telegramChatId=document.getElementById("tg-chat").value.trim();await saveSettings()});
-  document.getElementById("tg-test")?.addEventListener("click",async()=>{const r=await chrome.runtime.sendMessage({type:"ORION_TELEGRAM_SEND",payload:{token:document.getElementById("tg-token").value.trim(),chatId:document.getElementById("tg-chat").value.trim(),text:"✅ Teste do Live Infinity."}});document.getElementById("tg-msg").textContent=r?.ok?"Enviado com sucesso.":(r?.error||"Falha.")});
+
+  document.getElementById("save-telegram")?.addEventListener("click",async()=>{
+    const token=document.getElementById("telegram-token")?.value.trim()||"";
+    const chatId=document.getElementById("telegram-chat")?.value.trim()||"";
+    const enabled=Boolean(
+      document.getElementById("telegram-enabled")?.checked
+    );
+
+    const status=document.getElementById("telegram-save-status");
+
+    if(enabled&&(!token||!chatId)){
+      if(status){
+        status.textContent=
+          "Preencha o Token do Bot e o Chat ID antes de ativar.";
+      }
+      return;
+    }
+
+    state.settings.telegramEnabled=enabled;
+    state.settings.telegramToken=token;
+    state.settings.telegramChatId=chatId;
+
+    await saveSettings();
+
+    if(status){
+      status.textContent=
+        token&&chatId
+          ?"✅ Configurações do Telegram salvas com sucesso."
+          :"Configuração do Telegram removida.";
+    }
+  });
+
+  document.getElementById("test-telegram")?.addEventListener("click",async()=>{
+    const token=document.getElementById("telegram-token")?.value.trim()||"";
+    const chatId=document.getElementById("telegram-chat")?.value.trim()||"";
+    const status=document.getElementById("telegram-save-status");
+
+    if(!token||!chatId){
+      if(status){
+        status.textContent="Preencha o Token do Bot e o Chat ID.";
+      }
+      return;
+    }
+
+    if(status)status.textContent="Testando conexão...";
+
+    const result=await chrome.runtime.sendMessage({
+      type:"ORION_TELEGRAM_SEND",
+      payload:{
+        token,
+        chatId,
+        text:"✅ Live Infinity conectado com sucesso!"
+      }
+    }).catch(error=>({
+      ok:false,
+      error:error?.message||"Falha ao testar o Telegram."
+    }));
+
+    if(result?.ok){
+      state.settings.telegramToken=token;
+      state.settings.telegramChatId=chatId;
+      state.settings.telegramEnabled=true;
+
+      const enabledInput=document.getElementById("telegram-enabled");
+      if(enabledInput)enabledInput.checked=true;
+
+      await saveSettings();
+
+      if(status){
+        status.textContent=
+          "✅ Conexão testada e configurações salvas.";
+      }
+      return;
+    }
+
+    if(status){
+      status.textContent=
+        `❌ ${result?.error||"Não foi possível enviar a mensagem."}`;
+    }
+  });
+
   document.getElementById("vb-download")?.addEventListener("click",()=>chrome.tabs.create({url:"https://vb-audio.com/Cable/"}));
   document.getElementById("vb-test")?.addEventListener("click",()=>{playTestTone();const m=document.getElementById("vb-msg");if(m)m.textContent="♫ Som reproduzido. Confira o medidor do Live Studio."});
   document.getElementById("audio-files")?.addEventListener("change",e=>{state.audioFiles.push(...[...e.target.files].map(f=>({name:f.name,url:URL.createObjectURL(f)})));render()});

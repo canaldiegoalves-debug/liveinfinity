@@ -810,12 +810,12 @@ function updatesPage() {
         <div class="card-head">
           <div>
             <small>NOVA ATUALIZAÇÃO</small>
-            <h2>Publicar atualização obrigatória</h2>
+            <h2>Publicar ZIP de atualização obrigatória</h2>
           </div>
         </div>
 
         <p class="muted">
-          O cliente será bloqueado até baixar e instalar a versão publicada.
+          Envie o ZIP da extensão. O cliente será bloqueado até instalar a versão publicada.
         </p>
 
         <label>Versão

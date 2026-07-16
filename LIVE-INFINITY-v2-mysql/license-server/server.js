@@ -13,6 +13,55 @@ const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const UPDATES_DIR = path.join(__dirname, "updates");
+
+const ADMIN_PANEL_PATH = (
+  process.env.ADMIN_PANEL_PATH ||
+  "/painel-seguro-liveinfinity"
+).replace(/\/+$/, "");
+
+const adminLoginAttempts = new Map();
+const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const ADMIN_LOGIN_MAX_ATTEMPTS = 8;
+
+function requestIp(request) {
+  return String(
+    request.headers["x-forwarded-for"] ||
+    request.socket?.remoteAddress ||
+    "unknown"
+  ).split(",")[0].trim();
+}
+
+function adminLoginBlocked(request) {
+  const ip = requestIp(request);
+  const now = Date.now();
+  const entry = adminLoginAttempts.get(ip);
+
+  if (!entry || now - entry.startedAt > ADMIN_LOGIN_WINDOW_MS) {
+    adminLoginAttempts.set(ip, { count: 0, startedAt: now });
+    return false;
+  }
+
+  return entry.count >= ADMIN_LOGIN_MAX_ATTEMPTS;
+}
+
+function registerAdminLoginFailure(request) {
+  const ip = requestIp(request);
+  const now = Date.now();
+  const entry = adminLoginAttempts.get(ip);
+
+  if (!entry || now - entry.startedAt > ADMIN_LOGIN_WINDOW_MS) {
+    adminLoginAttempts.set(ip, { count: 1, startedAt: now });
+    return;
+  }
+
+  entry.count += 1;
+  adminLoginAttempts.set(ip, entry);
+}
+
+function clearAdminLoginFailures(request) {
+  adminLoginAttempts.delete(requestIp(request));
+}
+
 fs.mkdirSync(UPDATES_DIR, { recursive: true });
 
 const CAKTO_CAPTURE_ONLY =
@@ -470,12 +519,32 @@ async function logEvent(request, eventType, licenseId = null, email = null, deta
   }
 }
 
-function serveStatic(requestPath, response) {
-  const normalized = requestPath === "/" ? "/index.html" : requestPath;
-  const safe = path.normalize(normalized).replace(/^(\.\.[/\\])+/, "");
+function serveAdminStatic(requestPath, response) {
+  if (
+    requestPath !== ADMIN_PANEL_PATH &&
+    !requestPath.startsWith(`${ADMIN_PANEL_PATH}/`)
+  ) {
+    text(response, 404, "Página não encontrada.");
+    return;
+  }
+
+  const relativePath =
+    requestPath === ADMIN_PANEL_PATH ||
+    requestPath === `${ADMIN_PANEL_PATH}/`
+      ? "/index.html"
+      : requestPath.slice(ADMIN_PANEL_PATH.length);
+
+  const safe = path
+    .normalize(relativePath)
+    .replace(/^(\.\.[/\\])+/, "");
+
   const filePath = path.join(PUBLIC_DIR, safe);
 
-  if (!filePath.startsWith(PUBLIC_DIR) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+  if (
+    !filePath.startsWith(PUBLIC_DIR) ||
+    !fs.existsSync(filePath) ||
+    fs.statSync(filePath).isDirectory()
+  ) {
     text(response, 404, "Arquivo não encontrado.");
     return;
   }
@@ -488,9 +557,22 @@ function serveStatic(requestPath, response) {
     ".png": "image/png"
   };
 
-  text(response, 200, fs.readFileSync(filePath), types[extension] || "application/octet-stream");
-}
+  response.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none';"
+  );
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("Cache-Control", "no-store");
 
+  text(
+    response,
+    200,
+    fs.readFileSync(filePath),
+    types[extension] || "application/octet-stream"
+  );
+}
 
 async function ensureDeviceFingerprintColumn() {
   const [columns] = await pool.query(
@@ -686,10 +768,19 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/admin/login" && request.method === "POST") {
+      if (adminLoginBlocked(request)) {
+        json(response, 429, {
+          ok: false,
+          error: "Muitas tentativas. Aguarde 15 minutos."
+        });
+        return;
+      }
+
       const body = await readBody(request);
 
       if (!safeEqual(body.username || "", ADMIN_USER) ||
           !safeEqual(body.password || "", ADMIN_PASSWORD)) {
+        registerAdminLoginFailure(request);
         await logEvent(request, "admin_login_failed");
         json(response, 401, {
           ok: false,
@@ -698,8 +789,13 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
+      clearAdminLoginFailures(request);
       await logEvent(request, "admin_login_success");
-      json(response, 200, { ok: true, token: adminToken() });
+      json(response, 200, {
+        ok: true,
+        token: adminToken(),
+        role: "admin"
+      });
       return;
     }
 
@@ -880,7 +976,7 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname.startsWith("/api/admin/")) {
       if (!adminAuthorized(request)) {
-        json(response, 401, {
+        json(response, 403, {
           ok: false,
           error: "Acesso administrativo negado."
         });
@@ -1551,7 +1647,7 @@ const licenseMatch = url.pathname.match(
       return;
     }
 
-    serveStatic(url.pathname, response);
+    serveAdminStatic(url.pathname, response);
   } catch (error) {
     console.error(error);
     json(response, 500, {
@@ -1574,6 +1670,7 @@ const licenseMatch = url.pathname.match(
   server.listen(PORT, HOST, () => {
     console.log(`Live Infinity v2: http://${HOST}:${PORT}`);
     console.log("Banco de dados: MySQL conectado");
+    console.log(`Painel Admin: ${ADMIN_PANEL_PATH}`);
   });
 })().catch(error => {
   console.error("Falha ao iniciar:", error.message);
