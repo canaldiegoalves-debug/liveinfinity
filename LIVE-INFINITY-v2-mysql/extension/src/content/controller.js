@@ -43,12 +43,41 @@ const OrionContentAutomation = {
   },
 
   async loadSettings() {
-    const data = await chrome.storage.local.get([ORION.STORAGE.SETTINGS]);
+    const data = await chrome.storage.local.get([
+      ORION.STORAGE.SETTINGS
+    ]);
+
     this.settings = {
       ...ORION.DEFAULTS,
       ...(data[ORION.STORAGE.SETTINGS] || {})
     };
+
+    const endTimerAt = Number(
+      this.settings.endTimerAt || 0
+    );
+
+    // Ao atualizar a página:
+    // timer já vencido é apagado e nunca encerra a LIVE.
+    if (
+      endTimerAt &&
+      endTimerAt <= Date.now()
+    ) {
+      this.settings.endTimerAt = null;
+      this.settings.endTimerPaused = false;
+      this.settings.endTimerRemainingMs = null;
+      this.settings.endTimerStartedAt = null;
+
+      OrionDetector.timerArmedThisPage = false;
+
+      await chrome.storage.local.set({
+        [ORION.STORAGE.SETTINGS]: this.settings
+      });
+    } else {
+      OrionDetector.timerArmedThisPage =
+        endTimerAt > Date.now();
+    }
   },
+
 
   applySettings() {
     this.configureComments();
@@ -60,168 +89,210 @@ const OrionContentAutomation = {
     this.commentTimer = null;
 
     if (!this.settings.commentsEnabled) return;
-    if (!Array.isArray(this.settings.comments) || !this.settings.comments.length) return;
 
-    // Mantém a posição atual enquanto a extensão estiver aberta.
-    // Em uma nova sessão, começa pelo primeiro item salvo.
-    if (
-      !Number.isInteger(this.commentIndex) ||
-      this.commentIndex < 0 ||
-      this.commentIndex >= this.settings.comments.length
-    ) {
-      this.commentIndex = 0;
-    }
-
-    this.scheduleNextComment();
-  },
-
-  scheduleNextComment() {
-    clearTimeout(this.commentTimer);
-    this.commentTimer = null;
-
-    if (!this.settings.commentsEnabled) return;
-
-    const comments = Array.isArray(this.settings.comments)
+    const messages = Array.isArray(
+      this.settings.comments
+    )
       ? this.settings.comments
           .map(value => String(value || "").trim())
           .filter(Boolean)
       : [];
 
-    if (!comments.length) return;
+    if (!messages.length) return;
 
-    const configuredMinimum = Math.floor(
-      Number(this.settings.minCommentDelay)
+    this.settings.comments = messages;
+    this.commentIndex = 0;
+
+    // Comportamento exato do LiveFlow:
+    // envia o primeiro e depois agenda os próximos.
+    OrionDetector.sendChat(messages[0]);
+    this.commentIndex = 1;
+
+    this.scheduleNextComment();
+  },
+
+
+  scheduleNextComment() {
+    if (
+      !this.settings.commentsEnabled ||
+      !this.settings.comments ||
+      !this.settings.comments.length
+    ) {
+      return;
+    }
+
+    const intervalMin = Number(
+      this.settings.minCommentDelay || 45
     );
 
-    const configuredMaximum = Math.floor(
-      Number(this.settings.maxCommentDelay)
+    const intervalMax = Number(
+      this.settings.maxCommentDelay || 90
     );
 
-    const minimum =
-      Number.isFinite(configuredMinimum) &&
-      configuredMinimum >= 1
-        ? configuredMinimum
-        : 45;
+    const delay =
+      Math.floor(
+        Math.random() *
+        (intervalMax - intervalMin + 1)
+      ) +
+      intervalMin;
 
-    const maximum =
-      Number.isFinite(configuredMaximum) &&
-      configuredMaximum >= 1
-        ? configuredMaximum
-        : 90;
+    this.commentTimer = setTimeout(() => {
+      const list = this.settings.comments;
 
-    const lower = Math.min(minimum, maximum);
-    const upper = Math.max(minimum, maximum);
+      OrionDetector.sendChat(
+        list[this.commentIndex % list.length]
+      );
 
-    const seconds =
-      Math.floor(Math.random() * (upper - lower + 1)) +
-      lower;
+      this.commentIndex += 1;
 
-    this.commentTimer = setTimeout(async () => {
-      if (!this.settings.commentsEnabled) return;
-
-      const selectedIndex =
-        this.commentIndex % comments.length;
-
-      const message = comments[selectedIndex];
-
-      let result = await OrionDetector.sendChat(message);
-
-      if (!result.ok && result.retryable) {
-        await OrionDetector.wait(1000);
-        result = await OrionDetector.sendChat(message);
-      }
-
-      if (result.ok) {
-        this.commentIndex =
-          (this.commentIndex + 1) % comments.length;
-      }
-
-      chrome.runtime.sendMessage({
-        type: "ORION_AUTOMATION_EVENT",
-        payload: {
-          kind: result.ok
-            ? "comment-sent"
-            : "comment-failed",
-          selectedIndex,
-          message,
-          result,
-          createdAt: new Date().toISOString()
-        }
-      }).catch(() => {});
-
-      // Agenda somente depois de terminar o envio atual.
       this.scheduleNextComment();
-    }, seconds * 1000);
+    }, delay * 1000);
   },
 
 
   configureAutoPin() {
-    clearInterval(this.autoPinTimer);
-
+    clearTimeout(this.autoPinTimer);
     this.autoPinTimer = null;
     this.autoPinBusy = false;
 
     if (!this.settings.autoPinEnabled) return;
 
-    // Faz um ciclo logo ao ativar.
-    this.refreshProductCycle("startup");
+    // LiveFlow começa entre 5 e 8 segundos.
+    const delay =
+      Math.floor(Math.random() * 3001) + 5000;
 
-    // Repete apenas a cada 20 segundos.
-    // Não monitora overlay para não ficar clicando continuamente.
-    this.autoPinTimer = setInterval(() => {
-      this.refreshProductCycle("scheduled-20s");
-    }, 20000);
+    this.autoPinTimer = setTimeout(
+      () => this.runLiveFlowAutoFix(),
+      delay
+    );
   },
 
-  async refreshProductCycle(reason = "manual") {
-    if (this.autoPinBusy) return {
-      ok: false,
-      skipped: true,
-      error: "O ciclo anterior ainda está em execução."
-    };
-
-    this.autoPinBusy = true;
-
-    try {
-      const result = await OrionDetector.refreshPinnedProduct(
-        this.settings.skipCoupons !== false
-      );
-
-      chrome.runtime.sendMessage({
-        type: "ORION_AUTOMATION_EVENT",
-        payload: {
-          kind: result.ok ? "product-refreshed" : "product-refresh-failed",
-          result,
-          createdAt: new Date().toISOString()
-        }
-      }).catch(() => {});
-
-      return result;
-    } catch (error) {
-      const result = {
-        ok: false,
-        error: error?.message || "Erro inesperado no ciclo de fixação."
-      };
-
-      chrome.runtime.sendMessage({
-        type: "ORION_AUTOMATION_EVENT",
-        payload: {
-          kind: "product-refresh-failed",
-          result,
-          createdAt: new Date().toISOString()
-        }
-      }).catch(() => {});
-
-      return result;
-    } finally {
-      this.autoPinBusy = false;
+  runLiveFlowAutoFix() {
+    if (!this.settings.autoPinEnabled) {
+      clearTimeout(this.autoPinTimer);
+      this.autoPinTimer = null;
+      return;
     }
+
+    const visibleButtons = [
+      ...document.querySelectorAll(
+        'button,[role="button"],[class*="btn"],[class*="Btn"]'
+      )
+    ].filter(element => {
+      if (!OrionDetector.isVisible(element)) {
+        return false;
+      }
+
+      // Regra obrigatória do Live Infinity:
+      // cupom nunca recebe clique.
+      return !OrionDetector.isStrictCouponElement(
+        element
+      );
+    });
+
+    const textOf = element =>
+      String(
+        element.textContent ||
+        element.innerText ||
+        element.getAttribute("aria-label") ||
+        ""
+      ).trim().toLowerCase();
+
+    const unpinButton = visibleButtons.find(
+      button => {
+        const text = textOf(button);
+
+        return (
+          text === "desafixar" ||
+          text === "unpin" ||
+          text === "desfixar" ||
+          text.includes("desafix") ||
+          text.includes("unpin")
+        );
+      }
+    );
+
+    const findSafePinButton = buttons =>
+      buttons.find(button => {
+        const text = textOf(button);
+
+        const isPin =
+          text === "fixar" ||
+          text === "pin" ||
+          text === "fix" ||
+          text.includes("fixar");
+
+        if (!isPin) return false;
+
+        return (
+          !OrionDetector.isStrictCouponElement(
+            button
+          ) &&
+          OrionDetector.isAuthorizedMainProductElement(
+            button
+          )
+        );
+      });
+
+    if (unpinButton) {
+      unpinButton.click();
+
+      const refixDelay =
+        Math.floor(Math.random() * 2501) + 1500;
+
+      setTimeout(() => {
+        const buttonsAfterUnpin = [
+          ...document.querySelectorAll(
+            'button,[role="button"],[class*="btn"],[class*="Btn"]'
+          )
+        ].filter(
+          element =>
+            OrionDetector.isVisible(element) &&
+            !OrionDetector.isStrictCouponElement(
+              element
+            )
+        );
+
+        const pinButton =
+          findSafePinButton(buttonsAfterUnpin);
+
+        if (pinButton) {
+          pinButton.click();
+        }
+      }, refixDelay);
+    } else {
+      const pinButton =
+        findSafePinButton(visibleButtons);
+
+      if (pinButton) {
+        pinButton.click();
+      }
+    }
+
+    // LiveFlow repete entre 18 e 30 segundos.
+    const nextDelay =
+      Math.floor(Math.random() * 12001) +
+      18000;
+
+    this.autoPinTimer = setTimeout(
+      () => this.runLiveFlowAutoFix(),
+      nextDelay
+    );
+  },
+
+  async refreshProductCycle() {
+    this.runLiveFlowAutoFix();
+
+    return {
+      ok: true,
+      mode: "liveflow",
+      mainProductOnly: true
+    };
   },
 
   async pinProduct() {
     return this.refreshProductCycle();
   },
-
 
 
   configureExactEndTimer() {
@@ -231,7 +302,18 @@ const OrionContentAutomation = {
     if (this.settings.endTimerPaused) return;
 
     const endTimerAt = Number(this.settings.endTimerAt || 0);
-    if (!endTimerAt) return;
+
+    if (!endTimerAt) {
+      OrionDetector.timerArmedThisPage = false;
+      return;
+    }
+
+    if (endTimerAt <= Date.now()) {
+      OrionDetector.timerArmedThisPage = false;
+      return;
+    }
+
+    OrionDetector.timerArmedThisPage = true;
 
     const delay = Math.max(0, endTimerAt - Date.now());
 

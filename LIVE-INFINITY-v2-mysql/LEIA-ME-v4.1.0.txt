@@ -1,0 +1,28 @@
+LIVE INFINITY v4.1.0 — LIVEFLOW EXATO
+
+COMENTÁRIOS
+- Fluxo copiado do LiveFlow.
+- NativeSetter do textarea.
+- input, change, compositionstart e compositionend.
+- Enter após 300 ms.
+- Primeiro comentário enviado imediatamente.
+- Próximos respeitam o intervalo aleatório.
+
+FIXAÇÃO
+- Fluxo de desafixar e fixar copiado do LiveFlow.
+- Primeiro ciclo entre 5 e 8 segundos.
+- Repetição entre 18 e 30 segundos.
+- Refixação após 1,5 a 4 segundos.
+- Regra adicional mantida: cupom nunca é clicado.
+
+ENCERRAMENTO
+- Três métodos do LiveFlow copiados.
+- Seletor .arco-icon-im_close_chat.
+- Fallback por classe.
+- Fallback por texto.
+- Confirmação após 1,5 segundo.
+- Timer vencido antes do refresh é apagado.
+- Atualizar a página nunca autoriza encerramento.
+
+Servidor: 4.1.0
+Extensão: 4.1.0

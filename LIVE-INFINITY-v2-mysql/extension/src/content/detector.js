@@ -20,6 +20,7 @@ window.OrionDetector = {
   lastViolationHash: "",
   lastProtectionAt: 0,
   emergencyEndBusy: false,
+  timerArmedThisPage: false,
   emergencyWarningHash: "",
   uniqueSaleIds: new Set(),
   liveStartedAt: 0,
@@ -987,23 +988,21 @@ window.OrionDetector = {
       ...(stored[ORION.STORAGE.SETTINGS] || {})
     };
 
-    const now = Date.now();
     const endTimerAt = Number(
       settings.endTimerAt || 0
     );
 
     const timerAuthorized =
       reason === "timer-zero" &&
+      this.timerArmedThisPage === true &&
       endTimerAt > 0 &&
       !settings.endTimerPaused &&
-      now >= endTimerAt;
+      Date.now() >= endTimerAt;
 
     const warningAuthorized =
       reason === "warning" &&
       Boolean(settings.protectionEnabled);
 
-    // Trava final: nenhuma chamada escondida consegue clicar
-    // no botão fora das duas regras autorizadas.
     if (
       !dryRun &&
       !timerAuthorized &&
@@ -1014,83 +1013,204 @@ window.OrionDetector = {
         blocked: true,
         retryable: false,
         reason,
-        stage: "authorization-blocked",
         error:
-          "Encerramento bloqueado: timer não zerou e não há aviso crítico autorizado."
+          "Encerramento bloqueado pelas regras."
       };
     }
 
-    const initialDeadline = Date.now() + 5000;
-    let initial = null;
+    // MÉTODO 1 do LiveFlow:
+    // seletor exato do botão power.
+    const svgElement =
+      document.querySelector(
+        ".arco-icon-im_close_chat"
+      );
 
-    while (Date.now() < initialDeadline) {
-      initial = this.findEndLiveButton();
+    if (svgElement) {
+      let element = svgElement;
 
-      if (initial) break;
+      for (let index = 0; index < 5; index += 1) {
+        element = element.parentElement;
 
-      await this.wait(100);
-    }
+        if (!element) break;
 
-    if (!initial) {
-      return {
-        ok: false,
-        retryable: true,
-        reason,
-        stage: "initial-button-not-found",
-        error:
-          "Botão de energia da LIVE não localizado."
-      };
-    }
+        const tag =
+          element.tagName.toLowerCase();
 
-    if (dryRun) {
-      return {
-        ok: true,
-        dryRun: true,
-        reason,
-        stage: "initial-button-found",
-        method: initial.method,
-        buttonText: initial.text
-      };
-    }
+        const className =
+          element.className || "";
 
-    initial.element.click();
+        if (
+          tag === "button" ||
+          element.getAttribute("role") === "button" ||
+          className.includes("btn") ||
+          className.includes("button") ||
+          className.includes("icon-btn")
+        ) {
+          if (dryRun) {
+            return {
+              ok: true,
+              dryRun: true,
+              method: "liveflow-exact-selector"
+            };
+          }
 
-    const confirmationDeadline =
-      Date.now() + 10000;
+          element.click();
 
-    while (Date.now() < confirmationDeadline) {
-      const confirmation =
-        this.findConfirmEndButton();
+          await this.wait(1500);
 
-      if (confirmation) {
-        confirmation.element.click();
+          const confirmButton = [
+            ...document.querySelectorAll(
+              "button"
+            )
+          ].find(button =>
+            /encerrar agora|confirmar|end now|sim/i.test(
+              button.textContent.trim()
+            )
+          );
 
-        await this.wait(500);
+          if (confirmButton) {
+            confirmButton.click();
 
-        // A confirmação foi localizada e clicada.
+            return {
+              ok: true,
+              reason,
+              method: "liveflow-exact-selector",
+              confirmed: true
+            };
+          }
+
+          return {
+            ok: false,
+            retryable: true,
+            reason,
+            error:
+              "Confirmação de encerramento não encontrada."
+          };
+        }
+      }
+
+      if (dryRun) {
         return {
           ok: true,
-          reason,
-          stage: "confirmed",
-          initialMethod: initial.method,
-          initialButton: initial.text,
-          confirmationButton: confirmation.text,
-          completedAt: new Date().toISOString()
+          dryRun: true,
+          method: "liveflow-svg-parent"
         };
       }
 
-      await this.wait(150);
+      svgElement.parentElement?.click();
+
+      await this.wait(1500);
+
+      const confirmButton = [
+        ...document.querySelectorAll("button")
+      ].find(button =>
+        /encerrar agora|confirmar|end now/i.test(
+          button.textContent.trim()
+        )
+      );
+
+      if (confirmButton) {
+        confirmButton.click();
+
+        return {
+          ok: true,
+          reason,
+          method: "liveflow-svg-parent",
+          confirmed: true
+        };
+      }
+    }
+
+    // MÉTODO 2 do LiveFlow.
+    const closeElement =
+      document.querySelector(
+        '[class*="close_chat"],[class*="im_close"]'
+      );
+
+    if (closeElement) {
+      if (dryRun) {
+        return {
+          ok: true,
+          dryRun: true,
+          method: "liveflow-close-class"
+        };
+      }
+
+      (
+        closeElement.closest("button") ||
+        closeElement.parentElement
+      )?.click();
+
+      await this.wait(1500);
+
+      const confirmButton = [
+        ...document.querySelectorAll("button")
+      ].find(button =>
+        /encerrar agora|confirmar/i.test(
+          button.textContent.trim()
+        )
+      );
+
+      if (confirmButton) {
+        confirmButton.click();
+
+        return {
+          ok: true,
+          reason,
+          method: "liveflow-close-class",
+          confirmed: true
+        };
+      }
+    }
+
+    // MÉTODO 3 do LiveFlow.
+    const endButton = [
+      ...document.querySelectorAll("button")
+    ].find(button =>
+      /encerrar|end live/i.test(
+        button.textContent.trim()
+      )
+    );
+
+    if (endButton) {
+      if (dryRun) {
+        return {
+          ok: true,
+          dryRun: true,
+          method: "liveflow-text"
+        };
+      }
+
+      endButton.click();
+
+      await this.wait(1500);
+
+      const confirmButton = [
+        ...document.querySelectorAll("button")
+      ].find(button =>
+        /confirmar|sim|encerrar agora/i.test(
+          button.textContent.trim()
+        )
+      );
+
+      if (confirmButton) {
+        confirmButton.click();
+
+        return {
+          ok: true,
+          reason,
+          method: "liveflow-text",
+          confirmed: true
+        };
+      }
     }
 
     return {
       ok: false,
       retryable: true,
       reason,
-      stage: "confirmation-not-found",
-      initialMethod: initial.method,
-      initialButton: initial.text,
       error:
-        "O botão de confirmação não apareceu."
+        "Botão encerrar não encontrado."
     };
   },
 
@@ -1328,61 +1448,38 @@ window.OrionDetector = {
   },
 
   async sendChat(text) {
-    const message = String(text || "").trim();
-
-    if (!message) {
-      return {
-        ok: false,
-        retryable: false,
-        error: "Mensagem vazia."
-      };
-    }
-
-    const textarea =
-      document.querySelector('textarea[placeholder*="algo" i]') ||
-      document.querySelector('textarea[placeholder*="coment" i]') ||
-      document.querySelector('textarea[placeholder*="comment" i]') ||
-      document.querySelector('textarea[placeholder*="digite" i]') ||
-      document.querySelector('.chat-input textarea') ||
-      document.querySelector('[class*="chat" i] textarea') ||
-      document.querySelector('[class*="input" i] textarea') ||
-      document.querySelector('textarea.arco-textarea') ||
-      [...document.querySelectorAll("textarea")]
-        .find(element => this.isVisible(element));
-
-    if (!textarea || !this.isVisible(textarea)) {
-      return {
-        ok: false,
-        retryable: true,
-        error: "Campo de comentário não encontrado."
-      };
-    }
-
     try {
+      // Fluxo do LiveFlow: múltiplos seletores do campo do TikTok Shop.
+      const textarea =
+        document.querySelector('textarea[placeholder*="algo"]') ||
+        document.querySelector('textarea[placeholder*="comment"]') ||
+        document.querySelector('textarea[placeholder*="Comment"]') ||
+        document.querySelector('textarea[placeholder*="Digite"]') ||
+        document.querySelector('.chat-input textarea') ||
+        document.querySelector('[class*="chat"] textarea') ||
+        document.querySelector('[class*="input"] textarea') ||
+        document.querySelector('textarea.arco-textarea') ||
+        document.querySelector('textarea');
+
+      if (!textarea) {
+        return {
+          ok: false,
+          retryable: true,
+          error: "Campo de comentário não encontrado."
+        };
+      }
+
       textarea.focus();
       textarea.click();
 
+      // NativeSetter — força o React a reconhecer a mudança.
       const nativeSetter =
         Object.getOwnPropertyDescriptor(
           window.HTMLTextAreaElement.prototype,
           "value"
-        )?.set;
+        ).set;
 
-      if (!nativeSetter) {
-        return {
-          ok: false,
-          retryable: true,
-          error: "Setter nativo do campo não encontrado."
-        };
-      }
-
-      // Limpa primeiro para forçar o React a reconhecer uma nova entrada.
-      nativeSetter.call(textarea, "");
-      textarea.dispatchEvent(
-        new Event("input", { bubbles: true })
-      );
-
-      nativeSetter.call(textarea, message);
+      nativeSetter.call(textarea, text);
 
       textarea.dispatchEvent(
         new Event("input", { bubbles: true })
@@ -1392,65 +1489,61 @@ window.OrionDetector = {
         new Event("change", { bubbles: true })
       );
 
-      try {
-        textarea.dispatchEvent(
-          new CompositionEvent("compositionstart", {
+      textarea.dispatchEvent(
+        new CompositionEvent(
+          "compositionstart",
+          { bubbles: true }
+        )
+      );
+
+      textarea.dispatchEvent(
+        new CompositionEvent(
+          "compositionend",
+          {
+            data: text,
             bubbles: true
+          }
+        )
+      );
+
+      // LiveFlow aguarda o React e dispara Enter.
+      setTimeout(() => {
+        textarea.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Enter",
+            keyCode: 13,
+            bubbles: true,
+            cancelable: true
           })
         );
 
         textarea.dispatchEvent(
-          new CompositionEvent("compositionupdate", {
-            data: message,
-            bubbles: true
+          new KeyboardEvent("keypress", {
+            key: "Enter",
+            keyCode: 13,
+            bubbles: true,
+            cancelable: true
           })
         );
 
         textarea.dispatchEvent(
-          new CompositionEvent("compositionend", {
-            data: message,
+          new KeyboardEvent("keyup", {
+            key: "Enter",
+            keyCode: 13,
             bubbles: true
           })
         );
-      } catch {}
-
-      await this.wait(300);
-
-      const enterOptions = {
-        key: "Enter",
-        code: "Enter",
-        keyCode: 13,
-        which: 13,
-        charCode: 13,
-        bubbles: true,
-        cancelable: true
-      };
-
-      textarea.dispatchEvent(
-        new KeyboardEvent("keydown", enterOptions)
-      );
-
-      textarea.dispatchEvent(
-        new KeyboardEvent("keypress", enterOptions)
-      );
-
-      textarea.dispatchEvent(
-        new KeyboardEvent("keyup", enterOptions)
-      );
-
-      await this.wait(350);
+      }, 300);
 
       return {
         ok: true,
-        message
+        message: "Comentário enviado: " + text
       };
     } catch (error) {
       return {
         ok: false,
         retryable: true,
-        error:
-          error?.message ||
-          "Erro inesperado ao enviar comentário."
+        error: "Erro: " + error.message
       };
     }
   },
