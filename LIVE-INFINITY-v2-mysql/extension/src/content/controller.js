@@ -73,8 +73,13 @@ const OrionContentAutomation = {
         [ORION.STORAGE.SETTINGS]: this.settings
       });
     } else {
+      // Um timer futuro pode continuar após o refresh,
+      // mas nunca dispara durante a inicialização da página.
       OrionDetector.timerArmedThisPage =
         endTimerAt > Date.now();
+
+      OrionDetector.pageLoadedAt = Date.now();
+      OrionDetector.freshWarningAuthorizedAt = 0;
     }
   },
 

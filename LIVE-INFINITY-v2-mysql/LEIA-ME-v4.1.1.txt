@@ -1,0 +1,13 @@
+LIVE INFINITY v4.1.1 — REFRESH NÃO ENCERRA
+
+- Atualizar a página nunca autoriza encerramento.
+- Timer só autoriza ao chegar realmente em 00:00.
+- Timer não dispara nos primeiros 3 segundos da página.
+- Aviso precisa ser novo e detectado após o carregamento.
+- Avisos dos primeiros 30 segundos são ignorados.
+- Autorização de aviso expira em 10 segundos.
+- Motivos manual, startup e refresh são sempre bloqueados.
+- Comentários, fixação e clique de encerramento do LiveFlow mantidos.
+
+Servidor: 4.1.1
+Extensão: 4.1.1
