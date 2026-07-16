@@ -156,143 +156,18 @@ const OrionContentAutomation = {
 
 
   configureAutoPin() {
-    clearTimeout(this.autoPinTimer);
-    this.autoPinTimer = null;
-    this.autoPinBusy = false;
-
-    if (!this.settings.autoPinEnabled) return;
-
-    // LiveFlow começa entre 5 e 8 segundos.
-    const delay =
-      Math.floor(Math.random() * 3001) + 5000;
-
-    this.autoPinTimer = setTimeout(
-      () => this.runLiveFlowAutoFix(),
-      delay
-    );
+    // Gerenciado exclusivamente por liveflow-core.js
   },
 
   runLiveFlowAutoFix() {
-    if (!this.settings.autoPinEnabled) {
-      clearTimeout(this.autoPinTimer);
-      this.autoPinTimer = null;
-      return;
-    }
-
-    const visibleButtons = [
-      ...document.querySelectorAll(
-        'button,[role="button"],[class*="btn"],[class*="Btn"]'
-      )
-    ].filter(element => {
-      if (!OrionDetector.isVisible(element)) {
-        return false;
-      }
-
-      // Regra obrigatória do Live Infinity:
-      // cupom nunca recebe clique.
-      return !OrionDetector.isStrictCouponElement(
-        element
-      );
-    });
-
-    const textOf = element =>
-      String(
-        element.textContent ||
-        element.innerText ||
-        element.getAttribute("aria-label") ||
-        ""
-      ).trim().toLowerCase();
-
-    const unpinButton = visibleButtons.find(
-      button => {
-        const text = textOf(button);
-
-        return (
-          text === "desafixar" ||
-          text === "unpin" ||
-          text === "desfixar" ||
-          text.includes("desafix") ||
-          text.includes("unpin")
-        );
-      }
-    );
-
-    const findSafePinButton = buttons =>
-      buttons.find(button => {
-        const text = textOf(button);
-
-        const isPin =
-          text === "fixar" ||
-          text === "pin" ||
-          text === "fix" ||
-          text.includes("fixar");
-
-        if (!isPin) return false;
-
-        return (
-          !OrionDetector.isStrictCouponElement(
-            button
-          ) &&
-          OrionDetector.isAuthorizedMainProductElement(
-            button
-          )
-        );
-      });
-
-    if (unpinButton) {
-      unpinButton.click();
-
-      const refixDelay =
-        Math.floor(Math.random() * 2501) + 1500;
-
-      setTimeout(() => {
-        const buttonsAfterUnpin = [
-          ...document.querySelectorAll(
-            'button,[role="button"],[class*="btn"],[class*="Btn"]'
-          )
-        ].filter(
-          element =>
-            OrionDetector.isVisible(element) &&
-            !OrionDetector.isStrictCouponElement(
-              element
-            )
-        );
-
-        const pinButton =
-          findSafePinButton(buttonsAfterUnpin);
-
-        if (pinButton) {
-          pinButton.click();
-        }
-      }, refixDelay);
-    } else {
-      const pinButton =
-        findSafePinButton(visibleButtons);
-
-      if (pinButton) {
-        pinButton.click();
-      }
-    }
-
-    // LiveFlow repete entre 18 e 30 segundos.
-    const nextDelay =
-      Math.floor(Math.random() * 12001) +
-      18000;
-
-    this.autoPinTimer = setTimeout(
-      () => this.runLiveFlowAutoFix(),
-      nextDelay
-    );
+    // Gerenciado exclusivamente por liveflow-core.js
   },
 
   async refreshProductCycle() {
-    this.runLiveFlowAutoFix();
-
-    return {
-      ok: true,
-      mode: "liveflow",
-      mainProductOnly: true
-    };
+    window.dispatchEvent(
+      new CustomEvent("LIVE_INFINITY_MANUAL_PIN")
+    );
+    return { ok: true, mode: "liveflow-core" };
   },
 
   async pinProduct() {
@@ -301,95 +176,11 @@ const OrionContentAutomation = {
 
 
   configureExactEndTimer() {
-    clearTimeout(this.exactEndTimer);
-    this.exactEndTimer = null;
-
-    if (this.settings.endTimerPaused) return;
-
-    const endTimerAt = Number(this.settings.endTimerAt || 0);
-
-    if (!endTimerAt) {
-      OrionDetector.timerArmedThisPage = false;
-      return;
-    }
-
-    if (endTimerAt <= Date.now()) {
-      OrionDetector.timerArmedThisPage = false;
-      return;
-    }
-
-    OrionDetector.timerArmedThisPage = true;
-
-    const delay = Math.max(0, endTimerAt - Date.now());
-
-    this.exactEndTimer = setTimeout(() => {
-      this.handleEndTimer({
-        force: true,
-        reason: "timer-zero"
-      }).catch(console.error);
-    }, delay);
+    // Timer gerenciado exclusivamente por liveflow-core.js
   },
 
   startEmergencyEndLoop(reason = "timer-zero") {
-    clearTimeout(this.endLiveEmergencyTimer);
-    this.endLiveEmergencyTimer = null;
-
-    let attempts = 0;
-    const maxAttempts = 30;
-
-    const attemptEnd = async () => {
-      attempts += 1;
-
-      const result = await OrionDetector.endLive({
-        dryRun: false,
-        reason
-      });
-
-      chrome.runtime.sendMessage({
-        type: "ORION_AUTOMATION_EVENT",
-        payload: {
-          kind: result.ok
-            ? "live-end-confirmed"
-            : "live-end-retry",
-          reason,
-          attempts,
-          result,
-          createdAt: new Date().toISOString()
-        }
-      }).catch(() => {});
-
-      if (result.ok) {
-        await this.finishEndTimerSuccess(
-          reason,
-          result
-        );
-        return;
-      }
-
-      // Uma chamada sem autorização nunca deve continuar
-      // tentando clicar no botão.
-      if (result.blocked) {
-        clearTimeout(this.endLiveEmergencyTimer);
-        this.endLiveEmergencyTimer = null;
-        this.endTimerBusy = false;
-        return;
-      }
-
-      if (attempts >= maxAttempts) {
-        await this.finishEndTimerFailure(
-          reason,
-          result
-        );
-        return;
-      }
-
-      this.endLiveEmergencyTimer = setTimeout(
-        () => attemptEnd().catch(console.error),
-        500
-      );
-    };
-
-    attemptEnd().catch(console.error);
+    // Encerramento gerenciado exclusivamente por liveflow-core.js
   },
 
   async finishEndTimerSuccess(reason, result) {
@@ -464,56 +255,8 @@ const OrionContentAutomation = {
     this.endTimerBusy = false;
   },
 
-  async handleEndTimer({
-    force = false,
-    reason = "timer-zero"
-  } = {}) {
-    const endTimerAt = Number(
-      this.settings.endTimerAt || 0
-    );
-
-    const now = Date.now();
-
-    // Nunca encerra ao iniciar a LIVE.
-    // Para timer-zero, exige um timer válido e realmente vencido.
-    if (reason === "timer-zero") {
-      if (!endTimerAt) return;
-      if (this.settings.endTimerPaused) return;
-      if (!force && now < endTimerAt) return;
-    }
-
-    // Aviso crítico pode forçar encerramento sem depender do timer.
-    if (
-      reason !== "timer-zero" &&
-      reason !== "warning" &&
-      !force
-    ) {
-      return;
-    }
-
-    if (this.endTimerBusy) return;
-
-    if (
-      reason === "timer-zero" &&
-      this.completedEndTimerAt === endTimerAt
-    ) {
-      return;
-    }
-
-    this.endTimerBusy = true;
-
-    if (reason === "timer-zero") {
-      this.completedEndTimerAt = endTimerAt;
-    }
-
-    clearTimeout(this.commentTimer);
-    clearInterval(this.autoPinTimer);
-
-    this.commentTimer = null;
-    this.autoPinTimer = null;
-    this.autoPinBusy = false;
-
-    this.startEmergencyEndLoop(reason);
+  async handleEndTimer() {
+    // Encerramento gerenciado exclusivamente por liveflow-core.js
   },
 
   async handleLiveTransition() {

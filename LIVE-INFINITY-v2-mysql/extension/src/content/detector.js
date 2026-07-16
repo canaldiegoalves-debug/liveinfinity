@@ -172,10 +172,13 @@ window.OrionDetector = {
         // Autoriza apenas este aviso novo por 10 segundos.
         this.freshWarningAuthorizedAt = Date.now();
 
-        return this.endLiveImmediately({
-          reason: "warning",
-          warningText: text
-        });
+        window.dispatchEvent(
+          new CustomEvent(
+            "LIVE_INFINITY_CRITICAL_WARNING",
+            { detail: { text } }
+          )
+        );
+        return { ok: true, delegated: true };
       }).catch(console.error);
 
       return;
@@ -984,245 +987,25 @@ window.OrionDetector = {
     dryRun = false,
     reason = "manual"
   } = {}) {
-    const stored = await chrome.storage.local.get([
-      ORION.STORAGE.SETTINGS
-    ]);
-
-    const settings = {
-      ...ORION.DEFAULTS,
-      ...(stored[ORION.STORAGE.SETTINGS] || {})
-    };
-
-    const endTimerAt = Number(
-      settings.endTimerAt || 0
-    );
-
-    const timerAuthorized =
-      reason === "timer-zero" &&
-      this.timerArmedThisPage === true &&
-      endTimerAt > 0 &&
-      !settings.endTimerPaused &&
-      Date.now() >= endTimerAt &&
-      Date.now() - this.pageLoadedAt >= 3000;
-
-    const warningAuthorized =
-      reason === "warning" &&
-      Boolean(settings.protectionEnabled) &&
-      this.freshWarningAuthorizedAt > 0 &&
-      Date.now() - this.freshWarningAuthorizedAt <= 10000 &&
-      Date.now() - this.pageLoadedAt >= 30000;
-
-    if (
-      !dryRun &&
-      !timerAuthorized &&
-      !warningAuthorized
-    ) {
-      return {
-        ok: false,
-        blocked: true,
-        retryable: false,
-        reason,
-        error:
-          reason === "timer-zero"
-            ? "Encerramento bloqueado: o timer ainda não chegou a zero."
-            : reason === "warning"
-              ? "Encerramento bloqueado: não há aviso crítico novo autorizado."
-              : "Encerramento bloqueado: motivo não autorizado."
-      };
-    }
-
-    const findInitialEndButton = () => {
-      const svgElement =
-        document.querySelector(
-          ".arco-icon-im_close_chat"
-        );
-
-      if (svgElement) {
-        let element = svgElement;
-
-        for (let index = 0; index < 6; index += 1) {
-          const parent = element.parentElement;
-          if (!parent) break;
-
-          element = parent;
-
-          const tag = String(
-            element.tagName || ""
-          ).toLowerCase();
-
-          const className = String(
-            element.className || ""
-          );
-
-          if (
-            tag === "button" ||
-            element.getAttribute("role") === "button" ||
-            /btn|button|icon-btn/i.test(className)
-          ) {
-            return element;
-          }
-        }
-
-        return (
-          svgElement.parentElement ||
-          svgElement
-        );
-      }
-
-      const closeElement =
-        document.querySelector(
-          '[class*="close_chat"],[class*="im_close"]'
-        );
-
-      if (closeElement) {
-        return (
-          closeElement.closest(
-            "button,[role='button']"
-          ) ||
-          closeElement.parentElement ||
-          closeElement
-        );
-      }
-
-      return [
-        ...document.querySelectorAll(
-          "button,[role='button'],div[class*='button'],span[class*='button']"
-        )
-      ].find(element => {
-        const text = String(
-          element.innerText ||
-          element.textContent ||
-          element.getAttribute("aria-label") ||
-          ""
-        ).trim();
-
-        return /encerrar live|finalizar live|end live/i.test(
-          text
-        );
-      }) || null;
-    };
-
-    const findConfirmButton = () => {
-      const candidates = [
-        ...document.querySelectorAll(
-          "button,[role='button'],div[class*='button'],span[class*='button'],a"
-        )
-      ].filter(element => {
-        const style = window.getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-
-        return (
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          rect.width > 0 &&
-          rect.height > 0
-        );
-      });
-
-      const exact = candidates.find(element => {
-        const text = String(
-          element.innerText ||
-          element.textContent ||
-          element.getAttribute("aria-label") ||
-          element.getAttribute("title") ||
-          ""
-        ).replace(/\s+/g, " ").trim();
-
-        return /^(confirmar|encerrar agora|sim|end now|confirm)$/i.test(
-          text
-        );
-      });
-
-      if (exact) return exact;
-
-      return candidates.find(element => {
-        const text = String(
-          element.innerText ||
-          element.textContent ||
-          ""
-        ).replace(/\s+/g, " ").trim();
-
-        return /confirmar|encerrar agora|finalizar live|end now/i.test(
-          text
-        );
-      }) || null;
-    };
-
-    const initialButton = findInitialEndButton();
-
-    if (!initialButton) {
-      return {
-        ok: false,
-        retryable: true,
-        reason,
-        error:
-          "Botão inicial de encerramento não encontrado."
-      };
-    }
-
     if (dryRun) {
       return {
         ok: true,
         dryRun: true,
-        reason
+        delegated: true
       };
     }
 
-    initialButton.click();
-
-    // O modal pode levar alguns segundos para terminar de renderizar.
-    const deadline = Date.now() + 12000;
-
-    while (Date.now() < deadline) {
-      const confirmButton = findConfirmButton();
-
-      if (confirmButton) {
-        confirmButton.scrollIntoView({
-          block: "center",
-          inline: "center"
-        });
-
-        confirmButton.dispatchEvent(
-          new MouseEvent("mousedown", {
-            bubbles: true,
-            cancelable: true,
-            view: window
-          })
-        );
-
-        confirmButton.dispatchEvent(
-          new MouseEvent("mouseup", {
-            bubbles: true,
-            cancelable: true,
-            view: window
-          })
-        );
-
-        confirmButton.click();
-
-        await this.wait(500);
-
-        return {
-          ok: true,
-          reason,
-          confirmed: true,
-          confirmationText: String(
-            confirmButton.innerText ||
-            confirmButton.textContent ||
-            ""
-          ).trim()
-        };
-      }
-
-      await this.wait(150);
-    }
+    window.dispatchEvent(
+      new CustomEvent(
+        "LIVE_INFINITY_END_REQUEST",
+        { detail: { reason } }
+      )
+    );
 
     return {
-      ok: false,
-      retryable: true,
-      reason,
-      error:
-        "O modal abriu, mas o botão Confirmar não foi localizado."
+      ok: true,
+      delegated: true,
+      reason
     };
   },
 
