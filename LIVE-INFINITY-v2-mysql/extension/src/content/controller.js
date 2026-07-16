@@ -61,8 +61,16 @@ const OrionContentAutomation = {
     if (!this.settings.commentsEnabled) return;
     if (!Array.isArray(this.settings.comments) || !this.settings.comments.length) return;
 
-    // O primeiro comentário também respeita o intervalo definido no painel.
-    this.commentIndex = 0;
+    // Mantém a posição atual enquanto a extensão estiver aberta.
+    // Em uma nova sessão, começa pelo primeiro item salvo.
+    if (
+      !Number.isInteger(this.commentIndex) ||
+      this.commentIndex < 0 ||
+      this.commentIndex >= this.settings.comments.length
+    ) {
+      this.commentIndex = 0;
+    }
+
     this.scheduleNextComment();
   },
 
@@ -106,13 +114,16 @@ const OrionContentAutomation = {
       const message = comments[selectedIndex];
       let result = await OrionDetector.sendChat(message);
 
-      // Só avança depois da tentativa deste item da lista.
-      this.commentIndex =
-        (this.commentIndex + 1) % comments.length;
-
       if (!result.ok) {
         await OrionDetector.wait(900);
         result = await OrionDetector.sendChat(message);
+      }
+
+      // Avança somente depois do envio confirmado.
+      // Se falhar, o mesmo comentário será tentado no próximo ciclo.
+      if (result.ok) {
+        this.commentIndex =
+          (this.commentIndex + 1) % comments.length;
       }
 
       chrome.runtime.sendMessage({

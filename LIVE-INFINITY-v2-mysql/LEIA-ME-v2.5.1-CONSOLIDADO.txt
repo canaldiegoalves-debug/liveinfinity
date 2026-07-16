@@ -1,0 +1,18 @@
+LIVE INFINITY v2.5.1 — CONSOLIDADO
+
+Correções dos comentários:
+- Nenhum comentário pré-configurado.
+- Campo vazio com exemplos apenas no placeholder.
+- Botão Salvar comentários.
+- Lista e intervalos persistidos no chrome.storage.local.
+- Dados permanecem após fechar a extensão ou reiniciar o computador.
+- Comentários enviados em sequência.
+- Ao terminar a lista, volta ao primeiro.
+- Avança somente depois do envio confirmado.
+- Em caso de falha, tenta novamente o mesmo comentário.
+- O botão Iniciar também salva a lista atual.
+
+Todas as correções anteriores da v2.5.0 permanecem incluídas.
+
+Servidor: 2.5.1
+Extensão: 2.5.1

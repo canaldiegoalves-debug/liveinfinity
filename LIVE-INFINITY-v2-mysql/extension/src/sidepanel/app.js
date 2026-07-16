@@ -620,28 +620,66 @@ function home(){
 
     ${section("comments","🗨️","Comentários Automáticos","envio em sequência, respeitando o intervalo configurado",`
     <label>Lista de comentários</label>
-    <textarea id="comments" rows="8" placeholder="Digite um comentário por linha">${esc(state.settings.comments.join("\n"))}</textarea>
-    <p class="helper">A extensão envia a primeira linha, depois a segunda, a terceira e assim por diante. Ao chegar ao fim, volta para a primeira.</p>
+
+    <textarea
+      id="comments"
+      rows="9"
+      placeholder="Digite um comentário por linha. Exemplo:&#10;Aproveite a oferta na sacola!&#10;Esse produto está saindo muito!&#10;Garanta o seu antes que acabe!"
+    >${esc((state.settings.comments||[]).join("\n"))}</textarea>
+
+    <p class="helper">
+      Os exemplos transparentes são apenas uma orientação e não serão enviados.
+      A extensão usa somente os comentários que você salvar.
+    </p>
 
     <div class="card-row">
       <div>
         <label>Intervalo mínimo (segundos)</label>
-        <input id="min-delay" type="number" min="1" value="${state.settings.minCommentDelay}">
+        <input
+          id="min-delay"
+          type="number"
+          min="1"
+          value="${state.settings.minCommentDelay}"
+        >
       </div>
+
       <div>
         <label>Intervalo máximo (segundos)</label>
-        <input id="max-delay" type="number" min="1" value="${state.settings.maxCommentDelay}">
+        <input
+          id="max-delay"
+          type="number"
+          min="1"
+          value="${state.settings.maxCommentDelay}"
+        >
       </div>
     </div>
 
-    <p class="helper">Exemplo: mínimo 15 e máximo 50 envia cada comentário após um intervalo sorteado entre 15 e 50 segundos.</p>
+    <p class="helper">
+      A ordem será: primeiro, segundo, terceiro e assim por diante.
+      Ao chegar ao final da lista, volta ao primeiro comentário.
+    </p>
 
     <div class="actions">
-      <button id="comments-start" class="btn-primary">▶ Iniciar comentários</button>
-      <button id="comments-stop" class="btn-danger">■ Parar</button>
+      <button id="comments-save" class="btn-secondary">
+        💾 Salvar comentários
+      </button>
+
+      <button id="comments-start" class="btn-primary">
+        ▶ Iniciar comentários
+      </button>
+
+      <button id="comments-stop" class="btn-danger">
+        ■ Parar
+      </button>
     </div>
 
-    <p id="comments-status" class="helper">${state.settings.commentsEnabled?"Comentários ativos.":"Comentários parados."}</p>
+    <p id="comments-status" class="helper">
+      ${state.settings.commentsEnabled
+        ? "Comentários ativos."
+        : (state.settings.comments||[]).length
+          ? `${state.settings.comments.length} comentário(s) salvo(s).`
+          : "Nenhum comentário salvo."}
+    </p>
   `,false)}
 
   ${section("telegram","✈️","Notificações Telegram","receba alertas diretamente no celular",`
@@ -973,7 +1011,106 @@ function bind(){
         :`Falha no teste: ${result?.error||"campo do chat não localizado"}`;
     }
   });
-  document.getElementById("comments-start")?.addEventListener("click",async()=>{state.settings.comments=document.getElementById("comments").value.split("\n").map(x=>x.trim()).filter(Boolean);state.settings.minCommentDelay=+document.getElementById("min-delay").value||45;state.settings.maxCommentDelay=+document.getElementById("max-delay").value||90;state.settings.commentsEnabled=true;await saveSettings();const event=document.getElementById("comments-status");if(event)event.textContent="Comentários automáticos ativados."});
+  document.getElementById("comments-save")?.addEventListener("click",async()=>{
+    const comments=document
+      .getElementById("comments")
+      .value.split("\n")
+      .map(value=>value.trim())
+      .filter(Boolean);
+
+    const configuredMinimum=Math.floor(
+      Number(document.getElementById("min-delay").value)
+    );
+
+    const configuredMaximum=Math.floor(
+      Number(document.getElementById("max-delay").value)
+    );
+
+    const validMinimum=
+      Number.isFinite(configuredMinimum)&&configuredMinimum>=1
+        ?configuredMinimum
+        :45;
+
+    const validMaximum=
+      Number.isFinite(configuredMaximum)&&configuredMaximum>=1
+        ?configuredMaximum
+        :90;
+
+    state.settings.comments=comments;
+    state.settings.minCommentDelay=Math.min(
+      validMinimum,
+      validMaximum
+    );
+    state.settings.maxCommentDelay=Math.max(
+      validMinimum,
+      validMaximum
+    );
+
+    await saveSettings();
+
+    const status=document.getElementById("comments-status");
+
+    if(status){
+      status.textContent=comments.length
+        ?`${comments.length} comentário(s) salvo(s) com sucesso.`
+        :"Lista vazia salva. Nenhum comentário será enviado.";
+    }
+  });
+
+  document.getElementById("comments-start")?.addEventListener("click",async()=>{
+    const comments=document
+      .getElementById("comments")
+      .value.split("\n")
+      .map(value=>value.trim())
+      .filter(Boolean);
+
+    if(!comments.length){
+      const status=document.getElementById("comments-status");
+      if(status){
+        status.textContent=
+          "Adicione e salve pelo menos um comentário antes de iniciar.";
+      }
+      return;
+    }
+
+    const configuredMinimum=Math.floor(
+      Number(document.getElementById("min-delay").value)
+    );
+
+    const configuredMaximum=Math.floor(
+      Number(document.getElementById("max-delay").value)
+    );
+
+    const validMinimum=
+      Number.isFinite(configuredMinimum)&&configuredMinimum>=1
+        ?configuredMinimum
+        :45;
+
+    const validMaximum=
+      Number.isFinite(configuredMaximum)&&configuredMaximum>=1
+        ?configuredMaximum
+        :90;
+
+    state.settings.comments=comments;
+    state.settings.minCommentDelay=Math.min(
+      validMinimum,
+      validMaximum
+    );
+    state.settings.maxCommentDelay=Math.max(
+      validMinimum,
+      validMaximum
+    );
+    state.settings.commentsEnabled=true;
+
+    await saveSettings();
+
+    const status=document.getElementById("comments-status");
+    if(status){
+      status.textContent=
+        `Comentários ativos: ${comments.length} item(ns) em sequência.`;
+    }
+  });
+
   document.getElementById("comments-stop")?.addEventListener("click",async()=>{clearTimeout(state.commentTimer);state.commentTimer=null;state.settings.commentsEnabled=false;await saveSettings();const event=document.getElementById("comments-status");if(event)event.textContent="Comentários automáticos parados."});
   document.getElementById("tg-save")?.addEventListener("click",async()=>{state.settings.telegramEnabled=document.getElementById("tg-enabled").checked;state.settings.telegramToken=document.getElementById("tg-token").value.trim();state.settings.telegramChatId=document.getElementById("tg-chat").value.trim();await saveSettings()});
   document.getElementById("tg-test")?.addEventListener("click",async()=>{const r=await chrome.runtime.sendMessage({type:"ORION_TELEGRAM_SEND",payload:{token:document.getElementById("tg-token").value.trim(),chatId:document.getElementById("tg-chat").value.trim(),text:"✅ Teste do Live Infinity."}});document.getElementById("tg-msg").textContent=r?.ok?"Enviado com sucesso.":(r?.error||"Falha.")});

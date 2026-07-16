@@ -9,11 +9,7 @@ window.ORION = {
   },
   DEFAULTS: {
     commentsEnabled: false,
-    comments: [
-      "Aproveita a oferta de hoje! 🔥",
-      "Clique no produto fixado para garantir o seu.",
-      "Restam poucas unidades disponíveis!"
-    ],
+    comments: [],
     minCommentDelay: 45,
     maxCommentDelay: 90,
     postSaleEnabled: false,
