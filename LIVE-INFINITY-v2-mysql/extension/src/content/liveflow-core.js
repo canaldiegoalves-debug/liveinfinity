@@ -12,6 +12,9 @@
 
   let autoFixTimeout = null;
   let timerTimeout = null;
+  let timerWatchdog = null;
+  let armedTimerEndAt = 0;
+  let timerEndTriggered = false;
   let warningLock = false;
   let sessionArmed = false;
   let pageLoadedAt = Date.now();
@@ -508,56 +511,86 @@
   // TIMER — única origem autorizada
   // ================================================================
 
-  function configureTimer() {
+  function stopTimerWatchdog() {
     clearTimeout(timerTimeout);
+    clearInterval(timerWatchdog);
+
     timerTimeout = null;
+    timerWatchdog = null;
+  }
 
-    // Atualizar a página sempre desarma o encerramento.
-    // O usuário precisa clicar em "Iniciar sessão" novamente.
-    if (!sessionArmed) return;
-
-    const endAt = Number(
-      settings.endTimerAt || 0
-    );
-
+  function triggerTimerEnd() {
     if (
-      !endAt ||
-      settings.endTimerPaused
+      !sessionArmed ||
+      !armedTimerEndAt ||
+      timerEndTriggered ||
+      Date.now() < armedTimerEndAt
     ) {
       return;
     }
 
-    const remaining = endAt - Date.now();
+    timerEndTriggered = true;
+    stopTimerWatchdog();
 
-    // Timer antigo ou já vencido nunca encerra uma nova sessão.
-    if (remaining <= 0) {
-      settings.endTimerAt = null;
-      settings.endTimerPaused = false;
-      settings.endTimerRemainingMs = null;
-      settings.endTimerStartedAt = null;
+    // O horário fica preservado no núcleo mesmo que a interface
+    // já tenha limpado endTimerAt e mostrado "Inativo".
+    endLive();
+  }
 
-      chrome.storage.local.set({
-        [STORAGE_KEY]: settings
-      });
+  function configureTimer() {
+    if (!sessionArmed) {
+      stopTimerWatchdog();
+      armedTimerEndAt = 0;
+      timerEndTriggered = false;
+      return;
+    }
+
+    const storedEndAt = Number(
+      settings.endTimerAt || 0
+    );
+
+    // Um novo timer futuro substitui o snapshot anterior.
+    if (
+      storedEndAt > Date.now() &&
+      !settings.endTimerPaused
+    ) {
+      armedTimerEndAt = storedEndAt;
+      timerEndTriggered = false;
+
+      stopTimerWatchdog();
+
+      const remaining =
+        Math.max(0, armedTimerEndAt - Date.now());
+
+      timerTimeout = setTimeout(
+        triggerTimerEnd,
+        remaining
+      );
+
+      // Segunda camada: não depende do setTimeout nem do estado
+      // que a interface salvar ao chegar em 00:00.
+      timerWatchdog = setInterval(
+        triggerTimerEnd,
+        250
+      );
 
       return;
     }
 
-    timerTimeout = setTimeout(() => {
-      if (!sessionArmed) return;
-
-      const currentEndAt = Number(
-        settings.endTimerAt || 0
-      );
-
-      if (
-        currentEndAt > 0 &&
-        !settings.endTimerPaused &&
-        Date.now() >= currentEndAt
-      ) {
-        endLive();
+    // Quando a interface limpa o timer exatamente no zero,
+    // preserva o snapshot armado e executa o encerramento.
+    if (
+      armedTimerEndAt > 0 &&
+      !timerEndTriggered
+    ) {
+      if (Date.now() >= armedTimerEndAt) {
+        triggerTimerEnd();
       }
-    }, remaining);
+
+      return;
+    }
+
+    stopTimerWatchdog();
   }
 
   function applySettings(nextSettings) {
@@ -637,6 +670,9 @@
     "LIVE_INFINITY_SESSION_START",
     () => {
       sessionArmed = true;
+      timerEndTriggered = false;
+      armedTimerEndAt = 0;
+      stopTimerWatchdog();
 
       chrome.storage.local.get(
         STORAGE_KEY,
@@ -663,16 +699,16 @@
         event.detail?.reason || "";
 
       if (reason === "timer-zero") {
-        const endAt = Number(
-          settings.endTimerAt || 0
-        );
+        const endAt =
+          armedTimerEndAt ||
+          Number(settings.endTimerAt || 0);
 
         if (
           endAt > 0 &&
-          !settings.endTimerPaused &&
           Date.now() >= endAt
         ) {
-          endLive();
+          armedTimerEndAt = endAt;
+          triggerTimerEnd();
         }
       }
 
