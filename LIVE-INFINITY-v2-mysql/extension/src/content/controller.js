@@ -279,6 +279,15 @@ const OrionContentAutomation = {
         return;
       }
 
+      // Uma chamada sem autorização nunca deve continuar
+      // tentando clicar no botão.
+      if (result.blocked) {
+        clearTimeout(this.endLiveEmergencyTimer);
+        this.endLiveEmergencyTimer = null;
+        this.endTimerBusy = false;
+        return;
+      }
+
       if (attempts >= maxAttempts) {
         await this.finishEndTimerFailure(
           reason,
@@ -435,6 +444,34 @@ const OrionContentAutomation = {
     const isLive = Boolean(OrionDetector.state.live);
 
     if (isLive && !this.previousLiveState) {
+      // Um timer vencido de uma sessão anterior nunca pode
+      // encerrar uma nova LIVE.
+      const storedEndTimerAt = Number(
+        this.settings.endTimerAt || 0
+      );
+
+      if (
+        storedEndTimerAt &&
+        storedEndTimerAt <= Date.now()
+      ) {
+        this.settings.endTimerAt = null;
+        this.settings.endTimerPaused = false;
+        this.settings.endTimerRemainingMs = null;
+        this.settings.endTimerStartedAt = null;
+        this.completedEndTimerAt = null;
+        this.endTimerBusy = false;
+
+        clearTimeout(this.endLiveEmergencyTimer);
+        clearTimeout(this.exactEndTimer);
+
+        this.endLiveEmergencyTimer = null;
+        this.exactEndTimer = null;
+
+        await chrome.storage.local.set({
+          [ORION.STORAGE.SETTINGS]: this.settings
+        });
+      }
+
       // Mantém a preferência escolhida pelo usuário.
       // A proteção nunca é ativada automaticamente.
       chrome.runtime.sendMessage({

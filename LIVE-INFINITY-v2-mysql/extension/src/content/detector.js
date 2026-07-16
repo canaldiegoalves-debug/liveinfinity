@@ -154,9 +154,22 @@ window.OrionDetector = {
 
       this.emergencyWarningHash = hash;
 
-      this.endLiveImmediately({
-        reason: "warning",
-        warningText: text
+      chrome.storage.local.get(
+        [ORION.STORAGE.SETTINGS]
+      ).then(data => {
+        const currentSettings = {
+          ...ORION.DEFAULTS,
+          ...(data[ORION.STORAGE.SETTINGS] || {})
+        };
+
+        if (!currentSettings.protectionEnabled) {
+          return;
+        }
+
+        return this.endLiveImmediately({
+          reason: "warning",
+          warningText: text
+        });
       }).catch(console.error);
 
       return;
@@ -965,6 +978,48 @@ window.OrionDetector = {
     dryRun = false,
     reason = "manual"
   } = {}) {
+    const stored = await chrome.storage.local.get([
+      ORION.STORAGE.SETTINGS
+    ]);
+
+    const settings = {
+      ...ORION.DEFAULTS,
+      ...(stored[ORION.STORAGE.SETTINGS] || {})
+    };
+
+    const now = Date.now();
+    const endTimerAt = Number(
+      settings.endTimerAt || 0
+    );
+
+    const timerAuthorized =
+      reason === "timer-zero" &&
+      endTimerAt > 0 &&
+      !settings.endTimerPaused &&
+      now >= endTimerAt;
+
+    const warningAuthorized =
+      reason === "warning" &&
+      Boolean(settings.protectionEnabled);
+
+    // Trava final: nenhuma chamada escondida consegue clicar
+    // no botão fora das duas regras autorizadas.
+    if (
+      !dryRun &&
+      !timerAuthorized &&
+      !warningAuthorized
+    ) {
+      return {
+        ok: false,
+        blocked: true,
+        retryable: false,
+        reason,
+        stage: "authorization-blocked",
+        error:
+          "Encerramento bloqueado: timer não zerou e não há aviso crítico autorizado."
+      };
+    }
+
     const initialDeadline = Date.now() + 5000;
     let initial = null;
 

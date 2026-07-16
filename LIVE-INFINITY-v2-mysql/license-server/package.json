@@ -1,6 +1,6 @@
 {
   "name": "live-infinity-license-server",
-  "version": "4.0.2",
+  "version": "4.0.3",
   "private": true,
   "description": "API e painel administrativo Live Infinity com MySQL",
   "scripts": {

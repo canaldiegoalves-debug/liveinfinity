@@ -1,0 +1,13 @@
+LIVE INFINITY v4.0.3 — TRAVA DE ENCERRAMENTO
+
+- Mantida a função de clique baseada no LiveFlow.
+- Trava adicionada dentro da própria ação crítica.
+- Só encerra quando:
+  1. timer-zero com cronômetro realmente vencido; ou
+  2. warning com Proteção automática ligada.
+- Qualquer outra chamada é bloqueada.
+- Timer vencido da sessão anterior é apagado ao iniciar nova LIVE.
+- Uma chamada bloqueada não fica repetindo tentativas.
+
+Servidor: 4.0.3
+Extensão: 4.0.3
