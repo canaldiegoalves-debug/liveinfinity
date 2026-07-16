@@ -543,7 +543,7 @@ function home(){
 
     <div class="timer-panel">
       <span class="timer-kicker">TEMPO RESTANTE</span>
-      <strong id="remaining" class="timer-clock">${fmt(timerRemaining)}</strong>
+      <strong id="remaining" class="timer-clock ${timerRemaining<=599&&timerRemaining>0?"timer-critical":""}">${fmt(timerRemaining)}</strong>
       <small id="timer-started-label">
         ${state.settings.endTimerStartedAt
           ? `Iniciado: ${new Date(state.settings.endTimerStartedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}`
@@ -604,73 +604,44 @@ function home(){
     <div class="event-list">${(state.live.saleEvents||[]).slice(-8).reverse().map(e=>`<p>🛒 ${esc(e.text)}</p>`).join("")||"<p>Nenhuma venda detectada.</p>"}</div>
   `)}
 
-  ${section("post","💬","Mensagem pós-venda","envia parabéns no chat",`
+  ${section("post","💬","Prova social após vendas","uma mensagem agrupada, sem flood",`
     <div class="toggle-line"><span>Enviar automaticamente</span><input id="post-enabled" class="toggle" type="checkbox" ${state.settings.postSaleEnabled?"checked":""}></div>
-    <textarea id="post-message">${esc(state.settings.postSaleMessage)}</textarea>
-    <div class="actions"><button id="save-post" class="btn-primary">Salvar mensagem</button><button id="test-post" class="btn-secondary">Testar no chat</button></div>
-    <p id="post-status" class="helper">${state.settings.postSaleEnabled?"Agradecimento automático ATIVO.":"Agradecimento automático DESATIVADO."}</p>
+    <label>Mensagens de prova social</label>
+    <textarea id="post-message" rows="7" placeholder="Digite uma mensagem por linha">${esc((state.settings.postSaleMessages||[state.settings.postSaleMessage]).join("\n"))}</textarea>
+    <p class="helper">Use <code>{salesCount}</code> para inserir a quantidade real de vendas. As mensagens são usadas em sequência.</p>
+    <label>Espera para agrupar vendas (segundos)</label>
+    <input id="post-delay" type="number" min="5" value="${state.settings.postSaleDelaySeconds||10}">
+    <div class="actions"><button id="save-post" class="btn-primary">Salvar prova social</button><button id="test-post" class="btn-secondary">Testar no chat</button></div>
+    <p id="post-status" class="helper">${state.settings.postSaleEnabled?"Prova social automática ATIVA.":"Prova social automática DESATIVADA."}</p>
   `,false)}
 
   
-    <details class="telegram-tutorial">
-      <summary>📖 Como configurar o Telegram</summary>
-
-      <div class="tutorial-content">
-        <p><strong>1. Crie seu bot</strong></p>
-        <p>Abra o Telegram, procure por <code>@BotFather</code> e envie <code>/newbot</code>.</p>
-        <p>Escolha o nome do bot e copie o Token fornecido.</p>
-
-        <p><strong>2. Descubra seu Chat ID</strong></p>
-        <p>Procure por <code>@userinfobot</code>, clique em Start e copie o número exibido em Chat ID.</p>
-
-        <p><strong>3. Inicie uma conversa com o bot</strong></p>
-        <p>Abra o bot que você criou e envie uma mensagem, como <code>Olá</code>. Sem isso, o Telegram pode bloquear o primeiro envio.</p>
-
-        <p><strong>4. Preencha os campos</strong></p>
-        <p>Cole o Token do Bot e o Chat ID nos campos acima, ative as notificações e clique em testar.</p>
-
-        <p><strong>5. Som de caixa registradora</strong></p>
-        <p>Baixe o som abaixo e use como toque de notificação no Telegram ou no computador.</p>
-
-        <div class="actions">
-          <button id="download-cash-sound" class="btn-secondary" type="button">
-            🔊 Baixar som de caixa registradora
-          </button>
-          <button id="test-cash-sound" class="btn-secondary" type="button">
-            ▶ Ouvir som
-          </button>
-        </div>
-
-        <p id="cash-sound-status" class="helper"></p>
-
-        <p class="helper">
-          No Telegram, abra a conversa do bot, acesse as notificações da conversa
-          e selecione o arquivo baixado como som personalizado quando o sistema permitir.
-          Em alguns aparelhos, primeiro é necessário salvar o áudio nos arquivos do dispositivo.
-        </p>
-      </div>
-    </details>
-
-    ${section("protection","🛡️","Proteção contra Violação","encerra a LIVE ao detectar aviso crítico",`
-    <div class="toggle-line"><span>Proteção automática</span><input id="protection-enabled" class="toggle" type="checkbox" ${state.settings.protectionEnabled?"checked":""}></div>
-    <p class="helper">A detecção exige termos fortes como violação, diretrizes, advertência ou penalidade combinados com risco para a transmissão.</p>
-    <div class="protection-status ${state.live.violation?"danger":state.settings.protectionEnabled?"armed":""}">
-      <b>${state.live.violation?"🚨 AVISO DETECTADO":state.settings.protectionEnabled?"🛡️ PROTEÇÃO ARMADA":"Proteção desativada"}</b>
-      <span>${state.live.violation?esc(state.live.violation.text.slice(0,220)):"Nenhum aviso crítico detectado."}</span>
-    </div>
-    <div class="toggle-line"><span>Notificar no Telegram</span><input id="protection-telegram" class="toggle" type="checkbox" ${state.settings.protectionTelegram!==false?"checked":""}></div>
     
-    <div class="actions"><button id="protection-save" class="btn-primary">Salvar proteção</button><button id="protection-test" class="btn-secondary">Executar teste seguro</button></div>
-    <div class="actions"><button id="protection-end-now" class="btn-danger">Encerrar LIVE agora</button></div>
-    <p id="protection-msg" class="helper">O teste seguro valida a detecção e procura o botão de encerramento sem clicar nele.</p>
-    <div class="event-list">${state.protectionEvents.slice(-5).reverse().map(event=>`<p>${esc(event)}</p>`).join("")||"<p>Nenhum evento de proteção.</p>"}</div>
-  `)}
 
-  ${section("comments","🗨️","Comentários Automáticos","mensagens em intervalos aleatórios",`
-    <textarea id="comments">${esc(state.settings.comments.join("\n"))}</textarea>
-    <div class="card-row"><div><label>Mínimo</label><input id="min-delay" type="number" value="${state.settings.minCommentDelay}"></div><div><label>Máximo</label><input id="max-delay" type="number" value="${state.settings.maxCommentDelay}"></div></div>
-    <div class="actions"><button id="comments-start" class="btn-primary">▶ Iniciar</button><button id="comments-stop" class="btn-danger">■ Parar</button></div>
-    <p id="comments-status" class="helper">${state.settings.commentsEnabled?"Automação ativa no TikTok.":"Automação parada."}</p>
+    ${section("comments","🗨️","Comentários Automáticos","envio em sequência, respeitando o intervalo configurado",`
+    <label>Lista de comentários</label>
+    <textarea id="comments" rows="8" placeholder="Digite um comentário por linha">${esc(state.settings.comments.join("\n"))}</textarea>
+    <p class="helper">A extensão envia a primeira linha, depois a segunda, a terceira e assim por diante. Ao chegar ao fim, volta para a primeira.</p>
+
+    <div class="card-row">
+      <div>
+        <label>Intervalo mínimo (segundos)</label>
+        <input id="min-delay" type="number" min="1" value="${state.settings.minCommentDelay}">
+      </div>
+      <div>
+        <label>Intervalo máximo (segundos)</label>
+        <input id="max-delay" type="number" min="1" value="${state.settings.maxCommentDelay}">
+      </div>
+    </div>
+
+    <p class="helper">Exemplo: mínimo 15 e máximo 50 envia cada comentário após um intervalo sorteado entre 15 e 50 segundos.</p>
+
+    <div class="actions">
+      <button id="comments-start" class="btn-primary">▶ Iniciar comentários</button>
+      <button id="comments-stop" class="btn-danger">■ Parar</button>
+    </div>
+
+    <p id="comments-status" class="helper">${state.settings.commentsEnabled?"Comentários ativos.":"Comentários parados."}</p>
   `,false)}
 
   ${section("telegram","✈️","Notificações Telegram","receba alertas diretamente no celular",`
@@ -771,19 +742,6 @@ function home(){
       ${(state.protectionEvents||[]).slice(-6).reverse().map(event=>`<p>${esc(event.message||event.kind||"Evento de proteção")}</p>`).join("")||"<p>Nenhum evento de proteção.</p>"}
     </div>
   `)}
-
-  ${section("comments","🗨️","Comentários Automáticos","mensagens em intervalos aleatórios",`
-    <textarea id="comments">${esc(state.settings.comments.join("\n"))}</textarea>
-    <div class="card-row"><div><label>Mínimo</label><input id="min-delay" type="number" value="${state.settings.minCommentDelay}"></div><div><label>Máximo</label><input id="max-delay" type="number" value="${state.settings.maxCommentDelay}"></div></div>
-    <div class="actions"><button id="comments-start" class="btn-primary">▶ Iniciar</button><button id="comments-stop" class="btn-danger">■ Parar</button></div>
-    <p id="comments-status" class="helper">${state.settings.commentsEnabled?"Automação ativa no TikTok.":"Automação parada."}</p>
-  `,false)}
-
-  ${section("telegram","✈️","Notificações Telegram","vendas e alertas",`
-    <div class="toggle-line"><span>Ativar notificações</span><input id="tg-enabled" class="toggle" type="checkbox" ${state.settings.telegramEnabled?"checked":""}></div>
-    <label>Token do bot</label><input id="tg-token" value="${esc(state.settings.telegramToken)}"><label>Chat ID</label><input id="tg-chat" value="${esc(state.settings.telegramChatId)}">
-    <div class="actions"><button id="tg-save" class="btn-primary">Salvar</button><button id="tg-test" class="btn-secondary">Testar</button></div><p id="tg-msg" class="helper"></p>
-  `,false)}
 
   ${section("log","📋","Log de Eventos","diagnóstico em tempo real",`
     <div class="event-list"><p>Última leitura: ${state.live.lastScanAt?new Date(state.live.lastScanAt).toLocaleTimeString("pt-BR"):"—"}</p><p>Status do dashboard: ${state.live.dashboardDetected?"detectado":"não detectado"}</p></div>
@@ -976,7 +934,11 @@ function bind(){
   });
   document.getElementById("post-enabled")?.addEventListener("change",async e=>{
     state.settings.postSaleEnabled=e.target.checked;
-    state.settings.postSaleMessage=document.getElementById("post-message").value;
+    state.settings.postSaleMessages=document.getElementById("post-message").value
+      .split("\n").map(value=>value.trim()).filter(Boolean);
+    state.settings.postSaleMessage=state.settings.postSaleMessages[0]||
+      "Parabéns pela compra! {salesCount} pessoas já finalizaram a compra nessa live.";
+    state.settings.postSaleDelaySeconds=Math.max(5,Number(document.getElementById("post-delay")?.value)||10);
     await saveSettings();
 
     const status=document.getElementById("post-status");
@@ -1069,7 +1031,10 @@ function startTicker(){
 
     const remaining=Math.max(0,Math.ceil((state.endAt-Date.now())/1000));
     const clock=document.getElementById("remaining");
-    if(clock)clock.textContent=fmt(remaining);
+    if(clock){
+      clock.textContent=fmt(remaining);
+      clock.classList.toggle("timer-critical",remaining>0&&remaining<=599);
+    }
 
     if(remaining===0){
       clearInterval(state.endTimer);

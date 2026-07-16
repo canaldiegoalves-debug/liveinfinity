@@ -543,3 +543,6 @@ nav button.active{
   color: var(--muted);
   line-height: 1.7;
 }
+
+.timer-clock.timer-critical{color:#ff334f;text-shadow:0 0 12px rgba(255,51,79,.45),0 0 28px rgba(255,51,79,.22);animation:timerCriticalPulse 1s ease-in-out infinite alternate}
+@keyframes timerCriticalPulse{from{opacity:1}to{opacity:.72}}

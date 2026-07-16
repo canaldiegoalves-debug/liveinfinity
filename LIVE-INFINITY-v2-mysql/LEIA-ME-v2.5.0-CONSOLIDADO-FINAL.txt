@@ -1,0 +1,18 @@
+LIVE INFINITY v2.5.0 — CONSOLIDADO FINAL
+
+- Botão de energia do TikTok reconhecido para encerrar a LIVE.
+- Confirmação automática do encerramento.
+- Timer zerou: encerra imediatamente.
+- Aviso oficial: encerra imediatamente.
+- Contador de vendas usa a métrica real sem multiplicar eventos.
+- GMV preservado.
+- Prova social com {salesCount}, agrupamento e sem flood.
+- Apenas uma aba de Comentários, Telegram e Proteção.
+- Timer vermelho em 09:59.
+- Comentários sequenciais.
+- Bloqueio rigoroso de cupom.
+- Atualizações obrigatórias pelo Admin.
+- Todas as correções anteriores incluídas.
+
+Servidor: 2.5.0
+Extensão: 2.5.0

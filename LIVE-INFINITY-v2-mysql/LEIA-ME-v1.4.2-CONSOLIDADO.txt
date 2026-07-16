@@ -1,0 +1,25 @@
+LIVE INFINITY v1.4.2 — PACOTE COMPLETO CONSOLIDADO
+
+Correções desta versão:
+- Removida a segunda aba duplicada de comentários.
+- Existe apenas uma lista de comentários automáticos.
+- Comentários são enviados na ordem: primeiro, segundo, terceiro...
+- Ao terminar a lista, volta ao primeiro comentário.
+- O intervalo sempre respeita o mínimo e máximo definidos.
+- O primeiro comentário também aguarda o intervalo configurado.
+- Cupom, voucher, desconto e oferta são avaliados pelo card inteiro.
+- Há bloqueio estrutural e textual de cupom.
+- Há uma última validação imediatamente antes do clique.
+- Apenas um card confirmado como produto principal pode ser fixado.
+
+Também contém todas as atualizações anteriores:
+- Encerramento imediato por timer e aviso.
+- Atualização obrigatória pelo Admin.
+- Timer profissional.
+- Telegram com tutorial e som.
+- Vendas, GMV e agradecimento.
+- PRO/Premium, sincronização de plano e reinstalação no mesmo PC.
+
+Versões:
+- Servidor: 2.4.2
+- Extensão: 1.4.2

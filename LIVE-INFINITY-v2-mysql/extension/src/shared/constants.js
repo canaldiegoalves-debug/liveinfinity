@@ -17,7 +17,13 @@ window.ORION = {
     minCommentDelay: 45,
     maxCommentDelay: 90,
     postSaleEnabled: false,
-    postSaleMessage: "Obrigado pela compra, {nome}! 🎉",
+    postSaleMessage: "Parabéns pela compra! {salesCount} pessoas já finalizaram a compra nessa live. 🎉",
+    postSaleMessages: [
+      "Parabéns pela compra! {salesCount} pessoas já finalizaram a compra nessa live. 🎉",
+      "🔥 Já são {salesCount} compras confirmadas nesta live!",
+      "👏 {salesCount} pessoas já garantiram o produto. Aproveite também!"
+    ],
+    postSaleDelaySeconds: 10,
     telegramEnabled: false,
     telegramToken: "",
     telegramChatId: "",

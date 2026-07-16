@@ -4,10 +4,13 @@ const OrionContentAutomation = {
   settings: { ...ORION.DEFAULTS },
   commentTimer: null,
   commentIndex: 0,
-  lastCommentIndex: -1,
   autoPinTimer: null,
   autoPinBusy: false,
   seenSales: new Set(),
+  lastKnownSalesCount: 0,
+  postSaleTimer: null,
+  postSaleMessageIndex: 0,
+  pendingSalesCount: 0,
   previousLiveState: false,
   endTimerBusy: false,
   exactEndTimer: null,
@@ -60,7 +63,6 @@ const OrionContentAutomation = {
 
     // O primeiro comentário também respeita o intervalo definido no painel.
     this.commentIndex = 0;
-    this.lastCommentIndex = -1;
     this.scheduleNextComment();
   },
 
@@ -75,33 +77,38 @@ const OrionContentAutomation = {
 
     if (!comments.length) return;
 
-    const configuredMinimum = Number(this.settings.minCommentDelay);
-    const configuredMaximum = Number(this.settings.maxCommentDelay);
-    const minimum = Math.max(
-      5,
-      Number.isFinite(configuredMinimum) ? Math.floor(configuredMinimum) : 45
-    );
-    const maximum = Math.max(
-      minimum,
-      Number.isFinite(configuredMaximum) ? Math.floor(configuredMaximum) : 90
-    );
+    const configuredMinimum =
+      Math.floor(Number(this.settings.minCommentDelay));
+    const configuredMaximum =
+      Math.floor(Number(this.settings.maxCommentDelay));
+
+    const validMinimum =
+      Number.isFinite(configuredMinimum) && configuredMinimum >= 1
+        ? configuredMinimum
+        : 45;
+
+    const validMaximum =
+      Number.isFinite(configuredMaximum) && configuredMaximum >= 1
+        ? configuredMaximum
+        : 90;
+
+    const minimum = Math.min(validMinimum, validMaximum);
+    const maximum = Math.max(validMinimum, validMaximum);
+
+    // O intervalo escolhido sempre fica dentro dos valores do painel.
     const seconds =
       Math.floor(Math.random() * (maximum - minimum + 1)) + minimum;
 
     this.commentTimer = setTimeout(async () => {
-      let selectedIndex = 0;
-
-      if (comments.length > 1) {
-        do {
-          selectedIndex = Math.floor(Math.random() * comments.length);
-        } while (selectedIndex === this.lastCommentIndex);
-      }
-
-      this.lastCommentIndex = selectedIndex;
-      this.commentIndex += 1;
+      const selectedIndex =
+        this.commentIndex % comments.length;
 
       const message = comments[selectedIndex];
       let result = await OrionDetector.sendChat(message);
+
+      // Só avança depois da tentativa deste item da lista.
+      this.commentIndex =
+        (this.commentIndex + 1) % comments.length;
 
       if (!result.ok) {
         await OrionDetector.wait(900);
@@ -350,74 +357,58 @@ const OrionContentAutomation = {
   },
 
   async handleSales() {
-    for (const sale of OrionDetector.state.saleEvents || []) {
-      const fingerprint = this.saleFingerprint(sale);
-      if (!fingerprint) continue;
-      if (this.seenSales.has(fingerprint)) continue;
+    const currentCount=Math.max(0,Math.floor(Number(OrionDetector.state.sales)||0));
 
-      this.seenSales.add(fingerprint);
-
-      if (this.seenSales.size > 500) {
-        const oldest = this.seenSales.values().next().value;
-        this.seenSales.delete(oldest);
-      }
-
-      if (this.settings.postSaleEnabled) {
-        const extractedName =
-          String(sale.buyerName || "").trim() ||
-          sale.text.match(
-            /^(.+?)\s+(?:comprou|acabou de comprar|finalizou a compra|realizou um pedido)/i
-          )?.[1]?.trim() ||
-          "";
-
-        const name = /^(cliente|cliente\s*\d+|comprador|usuário|usuario|user)$/i.test(
-          extractedName
-        )
-          ? ""
-          : extractedName;
-
-        const messageTemplate = String(this.settings.postSaleMessage || "");
-
-        // Sem nome real, não envia agradecimento automático.
-        if (!name) {
-          chrome.runtime.sendMessage({
-            type: "ORION_AUTOMATION_EVENT",
-            payload: {
-              kind: "post-sale-skipped-no-real-name",
-              sale,
-              fingerprint,
-              createdAt: new Date().toISOString()
-            }
-          }).catch(() => {});
-
-          continue;
-        }
-
-        const message = messageTemplate
-          .replace(/\{nome\}/gi, name)
-          .replace(/\s{2,}/g, " ")
-          .trim();
-
-        if (message) {
-          await OrionDetector.sendChat(message);
-        }
-      }
-
-      if (
-        this.settings.telegramEnabled &&
-        this.settings.telegramToken &&
-        this.settings.telegramChatId
-      ) {
-        chrome.runtime.sendMessage({
-          type: "ORION_TELEGRAM_SEND",
-          payload: {
-            token: this.settings.telegramToken,
-            chatId: this.settings.telegramChatId,
-            text: `🛒 Nova venda\n${sale.text}`
-          }
-        }).catch(() => {});
-      }
+    if(this.lastKnownSalesCount===0){
+      this.lastKnownSalesCount=currentCount;
+      return;
     }
+
+    if(currentCount<=this.lastKnownSalesCount)return;
+
+    this.lastKnownSalesCount=currentCount;
+    this.pendingSalesCount=currentCount;
+
+    if(!this.settings.postSaleEnabled)return;
+
+    clearTimeout(this.postSaleTimer);
+
+    const configuredDelay=Math.floor(Number(this.settings.postSaleDelaySeconds));
+    const delaySeconds=Number.isFinite(configuredDelay)&&configuredDelay>=5?configuredDelay:10;
+
+    this.postSaleTimer=setTimeout(async()=>{
+      const salesCount=this.pendingSalesCount;
+      const templates=Array.isArray(this.settings.postSaleMessages)
+        ?this.settings.postSaleMessages.map(value=>String(value||"").trim()).filter(Boolean)
+        :[];
+
+      if(!templates.length){
+        templates.push(String(this.settings.postSaleMessage||
+          "Parabéns pela compra! {salesCount} pessoas já finalizaram a compra nessa live.").trim());
+      }
+
+      const template=templates[this.postSaleMessageIndex%templates.length];
+      this.postSaleMessageIndex=(this.postSaleMessageIndex+1)%templates.length;
+
+      const message=template
+        .replace(/\{salesCount\}/gi,String(salesCount))
+        .replace(/\{vendas\}/gi,String(salesCount))
+        .replace(/\{nome\}/gi,"")
+        .replace(/\s{2,}/g," ")
+        .trim();
+
+      const result=message
+        ?await OrionDetector.sendChat(message)
+        :{ok:false,error:"Mensagem pós-venda vazia."};
+
+      chrome.runtime.sendMessage({
+        type:"ORION_AUTOMATION_EVENT",
+        payload:{
+          kind:result.ok?"post-sale-social-proof-sent":"post-sale-social-proof-failed",
+          salesCount,message,result,createdAt:new Date().toISOString()
+        }
+      }).catch(()=>{});
+    },delaySeconds*1000);
   }
 };
 

@@ -21,6 +21,7 @@ window.OrionDetector = {
   lastProtectionAt: 0,
   emergencyEndBusy: false,
   emergencyWarningHash: "",
+  uniqueSaleIds: new Set(),
 
   start() {
     if (this.observer) return;
@@ -81,7 +82,8 @@ window.OrionDetector = {
       )
     );
 
-    return officialContainer && warningTerms.test(normalized);
+    const harmless=/configura[cç][aã]o salva|salvo com sucesso|mensagem enviada|produto fixado|conectado com sucesso/i;
+    return officialContainer&&!harmless.test(normalized)&&(warningTerms.test(normalized)||normalized.length>=12);
   },
 
   scanEmergencyWarnings(mutations = []) {
@@ -337,119 +339,78 @@ window.OrionDetector = {
 
   collectSales() {
     const salePattern =
-      /cliente comprou|acabou de comprar|comprou o produto|nova venda|pedido realizado|finalizou a compra/i;
+      /acabou de comprar|comprou o produto|nova venda|pedido realizado|finalizou a compra|realizou um pedido/i;
 
     const genericPattern =
-      /^(cliente|cliente\s*\d+|comprador|usuário|usuario|user)\b/i;
+      /^(cliente|cliente\s*\d+|comprador|usuário|usuario|user|gmv atribuído|gmv atribuido)\b/i;
 
-    const cleanName = (value) => {
-      const text = this.normalize(value)
-        .replace(
-          /\b(cliente comprou|acabou de comprar|comprou o produto|nova venda|pedido realizado|finalizou a compra)\b.*$/i,
-          ""
-        )
-        .replace(/[•·|:–—-]+$/g, "")
-        .trim();
-
-      if (!text || genericPattern.test(text)) return "";
-      if (text.length > 80) return "";
-      return text;
-    };
-
-    const findBuyerName = (element, saleText) => {
-      const root =
-        element.closest(
-          '[class*="order"],[class*="sale"],[class*="purchase"],[class*="notification"],[class*="message"],[class*="item"],li'
-        ) || element.parentElement || element;
-
-      const selectors = [
-        '[class*="buyer"]',
-        '[class*="customer"]',
-        '[class*="username"]',
-        '[class*="user-name"]',
-        '[class*="nickname"]',
-        '[class*="name"]',
-        '[data-e2e*="name"]',
-        '[data-testid*="name"]',
-        'strong',
-        'b'
-      ];
-
-      for (const selector of selectors) {
-        for (const node of root.querySelectorAll(selector)) {
-          const candidate = cleanName(node.innerText || node.textContent || "");
-          if (candidate) return candidate;
-        }
-      }
-
-      const directPatterns = [
-        /^(.+?)\s+(?:acabou de comprar|comprou o produto|finalizou a compra|realizou um pedido)/i,
-        /(?:nova venda|pedido realizado)[:\s-]+(.+?)(?:\s+comprou|\s*$)/i,
-        /^(.+?)\s+comprou\b/i
-      ];
-
-      for (const pattern of directPatterns) {
-        const match = saleText.match(pattern);
-        const candidate = cleanName(match?.[1] || "");
-        if (candidate) return candidate;
-      }
-
-      const lines = this.normalize(root.innerText || "")
-        .split(/\n+/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-
-      const saleIndex = lines.findIndex((line) => salePattern.test(line));
-      const nearby = saleIndex >= 0
-        ? lines.slice(Math.max(0, saleIndex - 3), saleIndex + 1).reverse()
-        : lines.slice(0, 4);
-
-      for (const line of nearby) {
-        const candidate = cleanName(line);
-        if (candidate && !salePattern.test(candidate)) return candidate;
-      }
-
-      return "";
-    };
-
-    const elements = [...document.querySelectorAll("body *")]
-      .filter((element) => {
-        const ownText = this.normalize(
-          [...element.childNodes]
-            .filter((node) => node.nodeType === Node.TEXT_NODE)
-            .map((node) => node.textContent)
-            .join(" ")
-        );
-        const fullText = this.normalize(element.innerText);
-        return salePattern.test(ownText || fullText);
-      });
-
-    const events = [];
-    const seen = new Set();
-
-    for (const element of elements) {
-      const text = this.normalize(element.innerText);
-      if (!text || text.length > 500) continue;
-
-      const buyerName = findBuyerName(element, text);
-
-      const stableText = text
+    const normalizeSaleText = (value) =>
+      this.normalize(value)
+        .toLowerCase()
         .replace(/\b(há|a)\s+\d+\s+(segundos?|minutos?)\b/gi, "")
         .replace(/\d{1,2}:\d{2}(?::\d{2})?/g, "")
+        .replace(/r\$\s*\d[\d.,]*/gi, "")
         .replace(/\s+/g, " ")
         .trim();
 
-      const id = `${buyerName}|${stableText}`.toLowerCase();
+    const cleanName = (value) => {
+      const text = this.normalize(value)
+        .replace(/\b(acabou de comprar|comprou o produto|nova venda|pedido realizado|finalizou a compra|realizou um pedido)\b.*$/i, "")
+        .replace(/[•·|:–—-]+$/g, "")
+        .trim();
+      if (!text || genericPattern.test(text) || text.length > 80) return "";
+      return text;
+    };
 
-      if (seen.has(id)) continue;
-      seen.add(id);
+    const roots = [...document.querySelectorAll(
+      '[class*="order"],[class*="sale"],[class*="purchase"],[class*="notification"],[data-e2e*="order"],[data-testid*="order"],li'
+    )].filter(element => {
+      if (!this.isVisible(element)) return false;
+      const text=this.normalize(element.innerText||element.textContent||"");
+      return text.length<=600&&salePattern.test(text);
+    });
 
-      events.push({
-        id,
-        text,
-        buyerName,
-        detectedAt: new Date().toISOString()
-      });
+    const leafRoots=roots.filter(root=>!roots.some(other=>
+      other!==root&&root.contains(other)&&salePattern.test(this.normalize(other.innerText||other.textContent||""))
+    ));
+
+    const events=[];
+    const scanSeen=new Set();
+
+    for(const root of leafRoots){
+      const text=this.normalize(root.innerText||root.textContent||"");
+      if(!text||text.length>600)continue;
+
+      const nameNodes=[...root.querySelectorAll(
+        '[class*="buyer"],[class*="customer"],[class*="username"],[class*="nickname"],[class*="name"],strong,b'
+      )];
+
+      let buyerName="";
+      for(const node of nameNodes){
+        const candidate=cleanName(node.innerText||node.textContent||"");
+        if(candidate){buyerName=candidate;break;}
+      }
+
+      if(!buyerName){
+        const direct=text.match(/^(.+?)\s+(?:acabou de comprar|comprou o produto|finalizou a compra|realizou um pedido)/i);
+        buyerName=cleanName(direct?.[1]||"");
+      }
+
+      const productText=this.normalize(
+        root.querySelector('[class*="product"],[class*="item-name"],[data-e2e*="product"],[data-testid*="product"]')?.innerText||""
+      );
+
+      const stableText=normalizeSaleText(text);
+      const id=[buyerName.toLowerCase(),normalizeSaleText(productText),stableText].filter(Boolean).join("|");
+      if(!id||scanSeen.has(id))continue;
+
+      scanSeen.add(id);
+      this.uniqueSaleIds.add(id);
+      events.push({id,text,buyerName,productName:productText,detectedAt:new Date().toISOString()});
+    }
+
+    if(this.uniqueSaleIds.size>1000){
+      this.uniqueSaleIds=new Set([...this.uniqueSaleIds].slice(-500));
     }
 
     return events.slice(-50);
@@ -480,52 +441,88 @@ window.OrionDetector = {
   isStrictCouponElement(element) {
     if (!element) return false;
 
+    const container =
+      this.findActionContainer(element) ||
+      element.closest?.(
+        '[class*="product"],[id*="product"],[class*="item"],[class*="card"],li'
+      ) ||
+      element;
+
+    const descendants = [
+      ...container.querySelectorAll?.(
+        '[aria-label],[title],[data-e2e],[data-testid],[class],[id]'
+      ) || []
+    ].slice(0, 120);
+
     const text = this.normalize(
       [
-        element.innerText,
-        element.textContent,
-        element.getAttribute?.("aria-label"),
-        element.getAttribute?.("title"),
-        element.getAttribute?.("data-e2e"),
-        element.getAttribute?.("data-testid"),
-        element.className,
-        element.id
+        container.innerText,
+        container.textContent,
+        container.getAttribute?.("aria-label"),
+        container.getAttribute?.("title"),
+        container.getAttribute?.("data-e2e"),
+        container.getAttribute?.("data-testid"),
+        container.className,
+        container.id,
+        ...descendants.map(node => [
+          node.innerText,
+          node.textContent,
+          node.getAttribute?.("aria-label"),
+          node.getAttribute?.("title"),
+          node.getAttribute?.("data-e2e"),
+          node.getAttribute?.("data-testid"),
+          node.className,
+          node.id
+        ].filter(Boolean).join(" "))
       ].filter(Boolean).join(" ")
-    );
+    ).toLowerCase();
 
-    const blocked =
-      /cupom|voucher|desconto|código promocional|codigo promocional|promo code|discount|oferta relâmpago|oferta relampago|claim coupon|usar cupom|resgatar cupom|coletar cupom|pegar cupom|aplicar cupom|% off|off\b/i;
+    const blockedTerms =
+      /cupom|cupons|voucher|desconto|código promocional|codigo promocional|promo code|discount|oferta relâmpago|oferta relampago|claim coupon|usar cupom|resgatar cupom|coletar cupom|pegar cupom|aplicar cupom|obter cupom|% off|\\boff\\b|economize|economia de r\\$|frete grátis|frete gratis/i;
 
-    if (blocked.test(text)) return true;
-
-    return Boolean(
-      element.closest?.(
-        '[class*="coupon"],[id*="coupon"],[class*="voucher"],[id*="voucher"],[class*="discount"],[id*="discount"],[data-e2e*="coupon"],[data-testid*="coupon"],[aria-label*="cupom" i],[title*="cupom" i]'
+    const blockedStructure = Boolean(
+      container.matches?.(
+        '[class*="coupon" i],[id*="coupon" i],[class*="voucher" i],[id*="voucher" i],[class*="discount" i],[id*="discount" i],[data-e2e*="coupon" i],[data-testid*="coupon" i],[aria-label*="cupom" i],[title*="cupom" i]'
+      ) ||
+      container.querySelector?.(
+        '[class*="coupon" i],[id*="coupon" i],[class*="voucher" i],[id*="voucher" i],[class*="discount" i],[id*="discount" i],[data-e2e*="coupon" i],[data-testid*="coupon" i],[aria-label*="cupom" i],[title*="cupom" i]'
       )
     );
+
+    return blockedStructure || blockedTerms.test(text);
   },
 
   isAuthorizedMainProductElement(element) {
     if (!element) return false;
-    if (this.isStrictCouponElement(element)) return false;
+
+    const container =
+      this.findActionContainer(element) ||
+      element.closest?.(
+        '[class*="product"],[id*="product"],[data-e2e*="product"],[data-testid*="product"],[class*="item-card"],[class*="goods"],li'
+      );
+
+    if (!container) return false;
+    if (this.isStrictCouponElement(container)) return false;
 
     const text = this.normalize(
       [
-        element.innerText,
-        element.textContent,
-        element.getAttribute?.("aria-label"),
-        element.getAttribute?.("title"),
-        element.className,
-        element.id
+        container.innerText,
+        container.textContent,
+        container.getAttribute?.("aria-label"),
+        container.getAttribute?.("title"),
+        container.className,
+        container.id
       ].filter(Boolean).join(" ")
-    );
+    ).toLowerCase();
 
-    const container = element.closest?.(
-      '[class*="product"],[id*="product"],[data-e2e*="product"],[data-testid*="product"],[class*="item-card"],[class*="goods"]'
-    );
+    const productEvidence =
+      /produto|product|item|estoque|vendido|adicionado ao carrinho|r\\$|sku/i.test(text) ||
+      Boolean(container.querySelector("img"));
 
-    return Boolean(container) ||
-      /produto principal|produto fixado|produto em destaque|main product|primary product/i.test(text);
+    const couponEvidence =
+      /cupom|voucher|desconto|promo code|discount|oferta relâmpago|oferta relampago|% off/i.test(text);
+
+    return productEvidence && !couponEvidence;
   },
 
   findProduct() {
@@ -795,34 +792,47 @@ window.OrionDetector = {
   },
 
   findEndLiveButton() {
-    const elements = [
-      ...document.querySelectorAll(
-        'button, [role="button"], [aria-label], [title]'
-      )
-    ].filter((element) => this.isVisible(element));
+    const viewportWidth=Math.max(window.innerWidth,1);
+    const elements=[...document.querySelectorAll(
+      'button,[role="button"],[aria-label],[title],[data-e2e],[data-testid]'
+    )].filter(element=>this.isVisible(element));
 
-    const ranked = elements
-      .map((element) => {
-        const text = this.buttonText(element);
-        const lower = text.toLowerCase();
-        let score = 0;
+    const ranked=elements.map((element,index)=>{
+      const text=this.buttonText(element);
+      const lower=text.toLowerCase();
+      const attributes=this.normalize([
+        element.getAttribute("aria-label"),element.getAttribute("title"),
+        element.getAttribute("data-e2e"),element.getAttribute("data-testid"),
+        element.id,element.className
+      ].filter(Boolean).join(" ")).toLowerCase();
 
-        if (/^encerrar live$|^finalizar live$|^encerrar transmissão$|^finalizar transmissão$/.test(lower)) score += 100;
-        if (/encerrar live|finalizar live|encerrar transmissão|finalizar transmissão/.test(lower)) score += 70;
-        if (/desligar live|parar transmissão|stop live|end live/.test(lower)) score += 60;
+      const rect=element.getBoundingClientRect();
+      const hasSvg=Boolean(element.querySelector("svg"));
+      const iconOnly=!lower||lower.length<=2;
+      const topToolbar=rect.top>=0&&rect.top<130;
+      const farRight=rect.right>viewportWidth*.82;
+      const toolbar=element.closest(
+        'header,[class*="header" i],[class*="toolbar" i],[class*="control" i],[class*="live" i]'
+      )||element.parentElement;
+      const toolbarText=this.normalize(toolbar?.innerText||toolbar?.textContent||"");
+      const toolbarHasTimer=/\b\d{1,2}:\d{2}:\d{2}\b/.test(toolbarText);
+      const siblings=toolbar?[...toolbar.querySelectorAll('button,[role="button"]')].filter(item=>this.isVisible(item)):[];
+      const lastVisibleControl=siblings.length>0&&siblings[siblings.length-1]===element;
 
-        const rect = element.getBoundingClientRect();
-        if (rect.top < 180) score += 8;
-        if (element.tagName === "BUTTON") score += 5;
+      let score=0;
+      if(/^encerrar live$|^finalizar live$|^encerrar transmissão$|^finalizar transmissão$/.test(lower))score+=1000;
+      if(/encerrar live|finalizar live|encerrar transmissão|finalizar transmissão|desligar live|parar transmissão|stop live|end live/.test(lower))score+=700;
+      if(/end.?live|stop.?live|power|shutdown|close.?live|finish.?live|encerrar|finalizar|desligar/.test(attributes))score+=800;
 
-        if (/cancelar|continuar|pausar|configura/.test(lower)) score -= 100;
+      if(hasSvg&&iconOnly&&topToolbar&&farRight&&toolbarHasTimer)score+=650;
+      if(lastVisibleControl&&topToolbar&&farRight&&hasSvg)score+=180;
+      if(element.tagName==="BUTTON")score+=30;
+      if(/cancelar|continuar|pausar|configura|microfone|volume|som|câmera|camera/.test(lower+" "+attributes))score-=1200;
 
-        return { element, text, score };
-      })
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score);
+      return{element,text:text||attributes||"botão de energia",score,index};
+    }).filter(item=>item.score>0).sort((a,b)=>b.score-a.score);
 
-    return ranked[0] || null;
+    return ranked[0]||null;
   },
 
   findConfirmEndButton() {
@@ -843,8 +853,8 @@ window.OrionDetector = {
         const text = this.buttonText(button).toLowerCase();
         let score = 0;
 
-        if (/^encerrar$|^finalizar$|^confirmar$|^encerrar agora$|^finalizar agora$/.test(text)) score += 100;
-        if (/encerrar live|finalizar live|confirmar encerramento|end live/.test(text)) score += 80;
+        if (/^encerrar$|^finalizar$|^confirmar$|^encerrar agora$|^finalizar agora$|^sim$|^confirm$|^end now$/.test(text)) score += 200;
+        if (/encerrar live|finalizar live|confirmar encerramento|encerrar transmissão|finalizar transmissão|end live|stop live/.test(text)) score += 160;
         if (/cancelar|continuar|voltar|manter live/.test(text)) score -= 100;
 
         if (score > 0) candidates.push({ element: button, text, score });
@@ -862,14 +872,14 @@ window.OrionDetector = {
     dryRun = false,
     reason = "manual"
   } = {}) {
-    const initialDeadline = Date.now() + 5000;
+    const initialDeadline = Date.now() + 10000;
     let initial = null;
 
     while (Date.now() < initialDeadline && !initial) {
       initial = this.findEndLiveButton();
 
       if (!initial) {
-        await this.wait(25);
+        await this.wait(20);
       }
     }
 
@@ -893,15 +903,19 @@ window.OrionDetector = {
       };
     }
 
+    initial.element.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,cancelable:true,view:window}));
+    initial.element.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,cancelable:true,view:window}));
     initial.element.click();
 
     let confirmation = null;
-    const confirmationDeadline = Date.now() + 3000;
+    const confirmationDeadline = Date.now() + 7000;
 
     while (Date.now() < confirmationDeadline) {
       confirmation = this.findConfirmEndButton();
 
       if (confirmation) {
+        confirmation.element.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,cancelable:true,view:window}));
+        confirmation.element.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,cancelable:true,view:window}));
         confirmation.element.click();
 
         return {
@@ -923,7 +937,7 @@ window.OrionDetector = {
         retryInitial.element.click();
       }
 
-      await this.wait(25);
+      await this.wait(20);
     }
 
     return {
@@ -1019,11 +1033,15 @@ window.OrionDetector = {
       "Espectadores"
     ]);
 
-    this.state.sales = Math.max(
-      Number(metric) || 0,
-      events.length,
-      Number(this.state.sales) || 0
-    );
+    const metricSales =
+      metric !== null && metric !== undefined
+        ? Math.max(0, Math.floor(Number(metric) || 0))
+        : null;
+
+    this.state.sales =
+      metricSales !== null
+        ? metricSales
+        : Math.max(Number(this.state.sales) || 0,this.uniqueSaleIds.size);
 
     if (gmvMetric !== null && gmvMetric !== undefined) {
       this.state.gmv = Number(gmvMetric);
@@ -1450,78 +1468,128 @@ window.OrionDetector = {
   },
 
   pinMainProduct(skipCoupons = true) {
-    const buttons = [...document.querySelectorAll("button")]
-      .filter((button) =>
-        /^fixar$|fixar produto|pin/i.test(this.normalize(button.innerText))
+    const buttons = [
+      ...document.querySelectorAll(
+        'button,[role="button"]'
+      )
+    ].filter((button) => {
+      if (!this.isVisible(button)) return false;
+
+      const label = this.normalize(
+        button.innerText ||
+        button.textContent ||
+        button.getAttribute("aria-label") ||
+        button.getAttribute("title") ||
+        ""
       );
 
+      return /^fixar$|^fixar produto$|^pin$|^pin product$/i.test(label);
+    });
+
     if (!buttons.length) {
-      return { ok: false, error: "Nenhum botão Fixar foi localizado." };
-    }
-
-    const ranked = buttons.map((button, index) => {
-      const container = this.findActionContainer(button);
-      const text = this.normalize(container?.innerText || button.innerText);
-      const coupon =
-        /cupom|voucher|desconto|código promocional|codigo promocional|oferta relâmpago|oferta relampago/i.test(text);
-
-      let score = 0;
-
-      if (/R\$/.test(text)) score += 6;
-      if (/estoque|vendido|cliques|adicionado ao carrinho/i.test(text)) score += 5;
-      if (container?.querySelector("img")) score += 3;
-      if (/produto/i.test(text)) score += 2;
-      if (coupon) score -= 20;
-
-      score -= index * 0.01;
-
-      return { button, text, coupon, score };
-    });
-
-    const eligible = ranked.filter((item) => {
-      const element = item.element || item.button || item.node;
-      if (item.coupon) return false;
-      if (this.isStrictCouponElement(element)) return false;
-      return this.isAuthorizedMainProductElement(element);
-    });
-
-    // Regra obrigatória: nunca fixar cupom, voucher ou desconto.
-    // Se somente cupons forem encontrados, não clica em nada.
-    if (skipCoupons && !eligible.length) {
       return {
         ok: false,
-        error: "Produto principal não localizado. Cupons foram ignorados.",
-        skippedCoupons: true,
-        skippedCoupons: true
+        error: "Nenhum botão Fixar foi localizado."
       };
     }
 
-    const target = eligible
-      .sort((a, b) => b.score - a.score)[0];
+    const candidates = buttons
+      .map((button, index) => {
+        const container =
+          this.findActionContainer(button) ||
+          button.closest(
+            '[class*="product"],[id*="product"],[class*="item"],[class*="card"],li'
+          );
+
+        const text = this.normalize(
+          container?.innerText || button.innerText || ""
+        );
+
+        const rect =
+          container?.getBoundingClientRect?.() ||
+          button.getBoundingClientRect();
+
+        const coupon = this.isStrictCouponElement(
+          container || button
+        );
+
+        const authorized =
+          !coupon &&
+          this.isAuthorizedMainProductElement(
+            container || button
+          );
+
+        let score = 0;
+
+        // O produto principal normalmente aparece antes dos demais.
+        score += Math.max(0, 10000 - Math.max(0, rect.top));
+        score -= index * 10;
+
+        if (/produto principal|main product|em destaque/i.test(text)) {
+          score += 50000;
+        }
+
+        if (/r\\$|estoque|vendido|adicionado ao carrinho/i.test(text)) {
+          score += 500;
+        }
+
+        if (container?.querySelector("img")) {
+          score += 100;
+        }
+
+        if (coupon) {
+          score = Number.NEGATIVE_INFINITY;
+        }
+
+        return {
+          button,
+          container,
+          text,
+          coupon,
+          authorized,
+          score
+        };
+      })
+      .filter(candidate =>
+        candidate.authorized &&
+        !candidate.coupon &&
+        Number.isFinite(candidate.score)
+      )
+      .sort((left, right) => right.score - left.score);
+
+    const target = candidates[0];
 
     if (!target) {
-      return { ok: false, error: "Produto principal não localizado." };
+      return {
+        ok: false,
+        skippedCoupons: true,
+        error:
+          "Nenhum produto principal seguro foi encontrado. Cupons e descontos foram bloqueados."
+      };
     }
 
-    const clickTarget = target.element || target.button || target.node || target;
+    // Última barreira imediatamente antes do clique.
     if (
-      this.isStrictCouponElement(clickTarget) ||
-      !this.isAuthorizedMainProductElement(clickTarget)
+      this.isStrictCouponElement(target.container || target.button) ||
+      !this.isAuthorizedMainProductElement(
+        target.container || target.button
+      )
     ) {
       return {
         ok: false,
-        skippedCoupons: this.isStrictCouponElement(clickTarget),
-        error: "Clique bloqueado: somente o produto principal pode ser fixado."
+        skippedCoupons: true,
+        error:
+          "Clique cancelado: o item não foi confirmado como produto principal."
       };
     }
-
 
     target.button.click();
 
     return {
       ok: true,
       text: target.text.slice(0, 160),
-      skippedCoupons: skipCoupons
+      skippedCoupons: true,
+      selectedAs: "main-product-only"
     };
   }
 };
