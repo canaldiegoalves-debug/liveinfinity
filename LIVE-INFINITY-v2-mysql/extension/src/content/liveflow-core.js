@@ -13,6 +13,8 @@
   let autoFixTimeout = null;
   let timerTimeout = null;
   let warningLock = false;
+  let sessionArmed = false;
+  let pageLoadedAt = Date.now();
 
   function random(min, max) {
     return Math.floor(
@@ -510,6 +512,10 @@
     clearTimeout(timerTimeout);
     timerTimeout = null;
 
+    // Atualizar a página sempre desarma o encerramento.
+    // O usuário precisa clicar em "Iniciar sessão" novamente.
+    if (!sessionArmed) return;
+
     const endAt = Number(
       settings.endTimerAt || 0
     );
@@ -523,7 +529,7 @@
 
     const remaining = endAt - Date.now();
 
-    // Timer expirado antes do carregamento é descartado.
+    // Timer antigo ou já vencido nunca encerra uma nova sessão.
     if (remaining <= 0) {
       settings.endTimerAt = null;
       settings.endTimerPaused = false;
@@ -538,7 +544,19 @@
     }
 
     timerTimeout = setTimeout(() => {
-      endLive();
+      if (!sessionArmed) return;
+
+      const currentEndAt = Number(
+        settings.endTimerAt || 0
+      );
+
+      if (
+        currentEndAt > 0 &&
+        !settings.endTimerPaused &&
+        Date.now() >= currentEndAt
+      ) {
+        endLive();
+      }
     }, remaining);
   }
 
@@ -590,6 +608,9 @@
   chrome.storage.local.get(
     STORAGE_KEY,
     data => {
+      sessionArmed = false;
+      pageLoadedAt = Date.now();
+
       applySettings(
         data[STORAGE_KEY] || {}
       );
@@ -615,6 +636,8 @@
   window.addEventListener(
     "LIVE_INFINITY_SESSION_START",
     () => {
+      sessionArmed = true;
+
       chrome.storage.local.get(
         STORAGE_KEY,
         data => {
@@ -634,10 +657,11 @@
   window.addEventListener(
     "LIVE_INFINITY_END_REQUEST",
     event => {
+      if (!sessionArmed) return;
+
       const reason =
         event.detail?.reason || "";
 
-      // Somente estas duas origens podem encerrar.
       if (reason === "timer-zero") {
         const endAt = Number(
           settings.endTimerAt || 0
@@ -645,35 +669,52 @@
 
         if (
           endAt > 0 &&
+          !settings.endTimerPaused &&
           Date.now() >= endAt
         ) {
           endLive();
         }
       }
 
-      if (
-        reason === "warning" &&
-        settings.protectionEnabled
-      ) {
-        endLive();
-      }
+      // Aviso é tratado exclusivamente pelo evento
+      // LIVE_INFINITY_CRITICAL_WARNING abaixo.
     }
   );
 
   window.addEventListener(
     "LIVE_INFINITY_CRITICAL_WARNING",
-    () => {
+    event => {
       if (
-        settings.protectionEnabled &&
-        !warningLock
+        !sessionArmed ||
+        !settings.protectionEnabled ||
+        warningLock
       ) {
-        warningLock = true;
-        endLive();
-
-        setTimeout(() => {
-          warningLock = false;
-        }, 10000);
+        return;
       }
+
+      const warningText = String(
+        event.detail?.text || ""
+      ).toLowerCase();
+
+      // Somente avisos realmente críticos podem encerrar.
+      const criticalWarning =
+        /violação|violacao|violation|penalidade|penalty|suspensão|suspensao|suspension|banimento|banned|banido|diretrizes da comunidade|community guidelines|risco à transmissão|risco a transmissao|transmission risk/.test(
+          warningText
+        );
+
+      if (!criticalWarning) return;
+
+      // Ignora qualquer alerta durante os primeiros 30 segundos.
+      if (Date.now() - pageLoadedAt < 30000) {
+        return;
+      }
+
+      warningLock = true;
+      endLive();
+
+      setTimeout(() => {
+        warningLock = false;
+      }, 10000);
     }
   );
 })();
