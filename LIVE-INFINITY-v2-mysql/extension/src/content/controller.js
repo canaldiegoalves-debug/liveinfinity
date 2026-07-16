@@ -372,16 +372,43 @@ const OrionContentAutomation = {
     force = false,
     reason = "timer-zero"
   } = {}) {
-    const endTimerAt = Number(this.settings.endTimerAt || 0);
+    const endTimerAt = Number(
+      this.settings.endTimerAt || 0
+    );
 
-    if (this.settings.endTimerPaused) return;
-    if (!endTimerAt) return;
-    if (!force && Date.now() < endTimerAt) return;
+    const now = Date.now();
+
+    // Nunca encerra ao iniciar a LIVE.
+    // Para timer-zero, exige um timer válido e realmente vencido.
+    if (reason === "timer-zero") {
+      if (!endTimerAt) return;
+      if (this.settings.endTimerPaused) return;
+      if (!force && now < endTimerAt) return;
+    }
+
+    // Aviso crítico pode forçar encerramento sem depender do timer.
+    if (
+      reason !== "timer-zero" &&
+      reason !== "warning" &&
+      !force
+    ) {
+      return;
+    }
+
     if (this.endTimerBusy) return;
-    if (this.completedEndTimerAt === endTimerAt) return;
+
+    if (
+      reason === "timer-zero" &&
+      this.completedEndTimerAt === endTimerAt
+    ) {
+      return;
+    }
 
     this.endTimerBusy = true;
-    this.completedEndTimerAt = endTimerAt;
+
+    if (reason === "timer-zero") {
+      this.completedEndTimerAt = endTimerAt;
+    }
 
     clearTimeout(this.commentTimer);
     clearInterval(this.autoPinTimer);
@@ -390,11 +417,21 @@ const OrionContentAutomation = {
     this.autoPinTimer = null;
     this.autoPinBusy = false;
 
-    // Não considera encerrado até clicar no botão de confirmação.
     this.startEmergencyEndLoop(reason);
   },
 
   async handleLiveTransition() {
+    // Ao detectar o início da LIVE, apenas limpa tentativas antigas.
+    // Nunca aciona o encerramento.
+    if (
+      OrionDetector.state.liveActive &&
+      !this.previousLiveActive
+    ) {
+      clearTimeout(this.endLiveEmergencyTimer);
+      this.endLiveEmergencyTimer = null;
+      this.endTimerBusy = false;
+    }
+
     const isLive = Boolean(OrionDetector.state.live);
 
     if (isLive && !this.previousLiveState) {

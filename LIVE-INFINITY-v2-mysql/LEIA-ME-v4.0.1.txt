@@ -1,0 +1,11 @@
+LIVE INFINITY v4.0.1
+
+CORREÇÃO DO ENCERRAMENTO
+- A LIVE nunca é encerrada ao iniciar.
+- Timer-zero exige um timer válido.
+- Timer-zero exige que o horário final tenha sido alcançado.
+- Avisos críticos continuam podendo encerrar imediatamente.
+- Tentativas antigas são canceladas ao detectar uma nova LIVE.
+
+Servidor: 4.0.1
+Extensão: 4.0.1
