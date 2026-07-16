@@ -1155,19 +1155,24 @@ function bind(){
     const status=document.getElementById("telegram-save-status");
 
     if(!token||!chatId){
-      if(status){
-        status.textContent="Preencha o Token do Bot e o Chat ID.";
-      }
+      if(status)status.textContent="Preencha o Token do Bot e o Chat ID.";
       return;
     }
+
+    state.settings.telegramToken=token;
+    state.settings.telegramChatId=chatId;
+    state.settings.telegramEnabled=true;
+
+    const enabledInput=document.getElementById("telegram-enabled");
+    if(enabledInput)enabledInput.checked=true;
+
+    await saveSettings();
 
     if(status)status.textContent="Testando conexão...";
 
     const result=await chrome.runtime.sendMessage({
       type:"ORION_TELEGRAM_SEND",
       payload:{
-        token,
-        chatId,
         text:"✅ Live Infinity conectado com sucesso!"
       }
     }).catch(error=>({
@@ -1175,26 +1180,10 @@ function bind(){
       error:error?.message||"Falha ao testar o Telegram."
     }));
 
-    if(result?.ok){
-      state.settings.telegramToken=token;
-      state.settings.telegramChatId=chatId;
-      state.settings.telegramEnabled=true;
-
-      const enabledInput=document.getElementById("telegram-enabled");
-      if(enabledInput)enabledInput.checked=true;
-
-      await saveSettings();
-
-      if(status){
-        status.textContent=
-          "✅ Conexão testada e configurações salvas.";
-      }
-      return;
-    }
-
     if(status){
-      status.textContent=
-        `❌ ${result?.error||"Não foi possível enviar a mensagem."}`;
+      status.textContent=result?.ok
+        ?"✅ Conexão testada e configurações salvas."
+        :`❌ ${result?.error||"Não foi possível enviar a mensagem."}`;
     }
   });
 

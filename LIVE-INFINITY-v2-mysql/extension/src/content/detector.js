@@ -743,8 +743,6 @@ window.OrionDetector = {
       chrome.runtime.sendMessage({
         type: "ORION_TELEGRAM_SEND",
         payload: {
-          token: settings.telegramToken,
-          chatId: settings.telegramChatId,
           text:
             `🚨 Aviso de violação detectado\n` +
             `${violation.text.slice(0, 500)}\n` +
@@ -804,80 +802,135 @@ window.OrionDetector = {
   },
 
   findEndLiveButton() {
-    const viewportWidth=Math.max(window.innerWidth,1);
-    const elements=[...document.querySelectorAll(
-      'button,[role="button"],[aria-label],[title],[data-e2e],[data-testid]'
-    )].filter(element=>this.isVisible(element));
+    // Método principal comprovado no TikTok Shop.
+    const exactIcon =
+      document.querySelector(".arco-icon-im_close_chat");
 
-    const ranked=elements.map((element,index)=>{
-      const text=this.buttonText(element);
-      const lower=text.toLowerCase();
-      const attributes=this.normalize([
-        element.getAttribute("aria-label"),element.getAttribute("title"),
-        element.getAttribute("data-e2e"),element.getAttribute("data-testid"),
-        element.id,element.className
-      ].filter(Boolean).join(" ")).toLowerCase();
+    if (exactIcon && this.isVisible(exactIcon)) {
+      let clickable = exactIcon;
 
-      const rect=element.getBoundingClientRect();
-      const hasSvg=Boolean(element.querySelector("svg"));
-      const iconOnly=!lower||lower.length<=2;
-      const topToolbar=rect.top>=0&&rect.top<170;
-      const farRight=rect.right>viewportWidth*.78;
-      const toolbar=element.closest(
-        'header,[class*="header" i],[class*="toolbar" i],[class*="control" i],[class*="live" i]'
-      )||element.parentElement;
-      const toolbarText=this.normalize(toolbar?.innerText||toolbar?.textContent||"");
-      const toolbarHasTimer=/\b\d{1,2}:\d{2}:\d{2}\b/.test(toolbarText);
-      const siblings=toolbar?[...toolbar.querySelectorAll('button,[role="button"]')].filter(item=>this.isVisible(item)):[];
-      const lastVisibleControl=siblings.length>0&&siblings[siblings.length-1]===element;
+      for (let depth = 0; depth < 6; depth += 1) {
+        const candidate = clickable?.parentElement;
+        if (!candidate) break;
 
-      let score=0;
-      if(/^encerrar live$|^finalizar live$|^encerrar transmissão$|^finalizar transmissão$/.test(lower))score+=1000;
-      if(/encerrar live|finalizar live|encerrar transmissão|finalizar transmissão|desligar live|parar transmissão|stop live|end live/.test(lower))score+=700;
-      if(/end.?live|stop.?live|power|shutdown|close.?live|finish.?live|encerrar|finalizar|desligar/.test(attributes))score+=800;
+        clickable = candidate;
 
-      if(hasSvg&&iconOnly&&topToolbar&&farRight&&toolbarHasTimer)score+=650;
-      if(lastVisibleControl&&topToolbar&&farRight&&hasSvg)score+=180;
-      if(element.tagName==="BUTTON")score+=30;
-      if(/cancelar|continuar|pausar|configura|microfone|volume|som|câmera|camera/.test(lower+" "+attributes))score-=1200;
+        const tag = String(candidate.tagName || "").toLowerCase();
+        const role = candidate.getAttribute?.("role");
+        const className = String(candidate.className || "");
 
-      return{element,text:text||attributes||"botão de energia",score,index};
-    }).filter(item=>item.score>0).sort((a,b)=>b.score-a.score);
+        if (
+          tag === "button" ||
+          role === "button" ||
+          /btn|button|icon-btn/i.test(className)
+        ) {
+          return {
+            element: candidate,
+            text: "botão de energia",
+            method: "arco-icon-im_close_chat"
+          };
+        }
+      }
 
-    return ranked[0]||null;
+      return {
+        element: exactIcon.parentElement || exactIcon,
+        text: "botão de energia",
+        method: "arco-icon-im_close_chat-parent"
+      };
+    }
+
+    // Fallback comprovado por classe parcial.
+    const closeIcon = document.querySelector(
+      '[class*="close_chat"],[class*="im_close"]'
+    );
+
+    if (closeIcon && this.isVisible(closeIcon)) {
+      return {
+        element:
+          closeIcon.closest("button,[role='button']") ||
+          closeIcon.parentElement ||
+          closeIcon,
+        text: "botão de encerramento",
+        method: "close-chat-class"
+      };
+    }
+
+    // Último fallback por texto.
+    const textButton = [
+      ...document.querySelectorAll(
+        "button,[role='button']"
+      )
+    ].find(element => {
+      if (!this.isVisible(element)) return false;
+
+      const text = this.normalize(
+        element.innerText ||
+        element.textContent ||
+        element.getAttribute("aria-label") ||
+        element.getAttribute("title") ||
+        ""
+      );
+
+      return /encerrar live|encerrar transmissão|finalizar live|end live|stop live/i.test(
+        text
+      );
+    });
+
+    return textButton
+      ? {
+          element: textButton,
+          text: this.buttonText(textButton),
+          method: "button-text"
+        }
+      : null;
   },
 
   findConfirmEndButton() {
-    const dialogs = [
+    const candidates = [
       ...document.querySelectorAll(
-        '[role="dialog"], [role="alertdialog"], [class*="modal" i]'
+        'button,[role="button"]'
       )
-    ].filter((element) => this.isVisible(element));
+    ].filter(element => this.isVisible(element));
 
-    const scopes = dialogs.length ? dialogs : [document.body];
+    const exact = candidates.find(element => {
+      const text = this.normalize(
+        element.innerText ||
+        element.textContent ||
+        element.getAttribute("aria-label") ||
+        element.getAttribute("title") ||
+        ""
+      );
 
-    const candidates = [];
+      return /^(encerrar agora|confirmar|finalizar agora|sim|end now|confirm)$/i.test(
+        text
+      );
+    });
 
-    for (const scope of scopes) {
-      for (const button of scope.querySelectorAll('button, [role="button"]')) {
-        if (!this.isVisible(button)) continue;
-
-        const text = this.buttonText(button).toLowerCase();
-        let score = 0;
-
-        if (/^encerrar$|^finalizar$|^confirmar$|^encerrar agora$|^finalizar agora$|^sim$|^confirm$|^end now$/.test(text)) score += 200;
-        if (/encerrar live|finalizar live|confirmar encerramento|encerrar transmissão|finalizar transmissão|end live|stop live/.test(text)) score += 160;
-        if (/cancelar|continuar|voltar|manter live/.test(text)) score -= 100;
-
-        if (score > 0) candidates.push({ element: button, text, score });
-      }
+    if (exact) {
+      return {
+        element: exact,
+        text: this.buttonText(exact)
+      };
     }
 
-    return candidates.sort((a, b) => b.score - a.score)[0] || null;
-  },
+    const partial = candidates.find(element => {
+      const text = this.normalize(
+        element.innerText ||
+        element.textContent ||
+        ""
+      );
 
-  wait(milliseconds) {
-    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+      return /encerrar agora|confirmar encerramento|finalizar transmissão|end now/i.test(
+        text
+      );
+    });
+
+    return partial
+      ? {
+          element: partial,
+          text: this.buttonText(partial)
+        }
+      : null;
   },
 
   async endLive({
@@ -920,7 +973,7 @@ window.OrionDetector = {
     initial.element.click();
 
     let confirmation = null;
-    const confirmationDeadline = Date.now() + 7000;
+    const confirmationDeadline = Date.now() + 10000;
 
     while (Date.now() < confirmationDeadline) {
       confirmation = this.findConfirmEndButton();
@@ -1183,138 +1236,114 @@ window.OrionDetector = {
   },
 
   async sendChat(text) {
-    const message = this.normalize(text);
+    const message = String(text || "").trim();
 
     if (!message) {
-      return { ok: false, error: "Mensagem vazia." };
+      return {
+        ok: false,
+        error: "Mensagem vazia."
+      };
     }
-
-    const input =
-      document.querySelector('textarea[placeholder*="algo" i]') ||
-      document.querySelector('textarea[placeholder*="coment" i]') ||
-      document.querySelector('textarea[placeholder*="comment" i]') ||
-      document.querySelector('textarea[placeholder*="digite" i]') ||
-      document.querySelector('[contenteditable="true"][role="textbox"]') ||
-      document.querySelector('[class*="chat" i] textarea') ||
-      document.querySelector('[class*="input" i] textarea') ||
-      document.querySelector('textarea.arco-textarea') ||
-      this.findChatInput();
-
-    if (!input || !this.isVisible(input)) {
-      return { ok: false, error: "Campo de comentário não localizado." };
-    }
-
-    const setValue = () => {
-      input.focus();
-      input.click();
-
-      if (input.tagName === "TEXTAREA") {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLTextAreaElement.prototype,
-          "value"
-        )?.set;
-        if (setter) setter.call(input, message);
-        else input.value = message;
-      } else if (input.tagName === "INPUT") {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value"
-        )?.set;
-        if (setter) setter.call(input, message);
-        else input.value = message;
-      } else {
-        input.textContent = message;
-      }
-
-      try {
-        input.dispatchEvent(new InputEvent("beforeinput", {
-          bubbles: true,
-          cancelable: true,
-          inputType: "insertText",
-          data: message
-        }));
-      } catch {}
-
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    };
-
-    const findSendButton = () => {
-      const scope =
-        input.closest('[class*="chat" i],[class*="comment" i],[class*="input" i],form') ||
-        input.parentElement ||
-        document;
-
-      return [...scope.querySelectorAll('button,[role="button"],[aria-label],[title]')]
-        .find(button => {
-          if (!this.isVisible(button)) return false;
-          const label = this.normalize(
-            button.innerText ||
-            button.textContent ||
-            button.getAttribute("aria-label") ||
-            button.getAttribute("title") ||
-            button.getAttribute("data-e2e") ||
-            button.getAttribute("data-testid") ||
-            ""
-          ).toLowerCase();
-
-          return /enviar|send|publicar|comentar|submit/.test(label);
-        });
-    };
-
-    const rpcErrorVisible = () => {
-      const text = this.normalize(document.body?.innerText || "").toLowerCase();
-      return /rpc call error|rpc error|falha ao enviar|não foi possível enviar|nao foi possivel enviar/.test(text);
-    };
 
     try {
-      setValue();
-      await this.wait(150);
+      const textarea =
+        document.querySelector('textarea[placeholder*="algo" i]') ||
+        document.querySelector('textarea[placeholder*="comment" i]') ||
+        document.querySelector('textarea[placeholder*="coment" i]') ||
+        document.querySelector('textarea[placeholder*="digite" i]') ||
+        document.querySelector('.chat-input textarea') ||
+        document.querySelector('[class*="chat" i] textarea') ||
+        document.querySelector('[class*="input" i] textarea') ||
+        document.querySelector('textarea.arco-textarea') ||
+        document.querySelector("textarea");
 
-      const sendButton = findSendButton();
-
-      if (sendButton) {
-        sendButton.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,cancelable:true,view:window}));
-        sendButton.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,cancelable:true,view:window}));
-        sendButton.click();
-      } else {
-        const options = {
-          key:"Enter",code:"Enter",keyCode:13,which:13,charCode:13,
-          bubbles:true,cancelable:true
-        };
-        input.dispatchEvent(new KeyboardEvent("keydown",options));
-        input.dispatchEvent(new KeyboardEvent("keypress",options));
-        input.dispatchEvent(new KeyboardEvent("keyup",options));
-      }
-
-      await this.wait(600);
-
-      if (rpcErrorVisible()) {
+      if (!textarea || !this.isVisible(textarea)) {
         return {
-          ok:false,
-          retryable:true,
-          error:"O TikTok retornou RPC call error ao enviar este comentário."
+          ok: false,
+          retryable: true,
+          error: "Campo de comentário não encontrado."
         };
       }
 
-      const remaining = "value" in input
-        ? this.normalize(input.value)
-        : this.normalize(input.textContent);
+      textarea.focus();
+      textarea.click();
 
-      if (remaining === message) {
+      const nativeSetter =
+        Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype,
+          "value"
+        )?.set;
+
+      if (!nativeSetter) {
         return {
-          ok:false,
-          retryable:true,
-          error:"O comentário não foi confirmado pelo TikTok."
+          ok: false,
+          retryable: true,
+          error: "Setter nativo do campo não encontrado."
         };
       }
 
-      return { ok:true, message };
+      nativeSetter.call(textarea, message);
+
+      textarea.dispatchEvent(
+        new Event("input", { bubbles: true })
+      );
+
+      textarea.dispatchEvent(
+        new Event("change", { bubbles: true })
+      );
+
+      try {
+        textarea.dispatchEvent(
+          new CompositionEvent("compositionstart", {
+            bubbles: true
+          })
+        );
+
+        textarea.dispatchEvent(
+          new CompositionEvent("compositionend", {
+            data: message,
+            bubbles: true
+          })
+        );
+      } catch {}
+
+      await this.wait(300);
+
+      const enterOptions = {
+        key: "Enter",
+        code: "Enter",
+        keyCode: 13,
+        which: 13,
+        charCode: 13,
+        bubbles: true,
+        cancelable: true
+      };
+
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", enterOptions)
+      );
+
+      textarea.dispatchEvent(
+        new KeyboardEvent("keypress", enterOptions)
+      );
+
+      textarea.dispatchEvent(
+        new KeyboardEvent("keyup", enterOptions)
+      );
+
+      // O TikTok processa o envio de forma assíncrona.
+      // Não usamos texto antigo de RPC na página como falso erro.
+      await this.wait(500);
+
+      return {
+        ok: true,
+        message
+      };
     } catch (error) {
       return {
-        ok:false,
-        retryable:true,
-        error:error?.message||"Erro inesperado ao enviar comentário."
+        ok: false,
+        retryable: true,
+        error: error?.message || "Erro ao enviar comentário."
       };
     }
   },

@@ -1,0 +1,33 @@
+LIVE INFINITY v3.1.0 — LIVEFLOW CORE
+
+COMENTÁRIOS
+- Setter nativo do textarea.
+- Eventos input, change, compositionstart e compositionend.
+- Enter após 300 ms.
+- Ordem sequencial da lista preservada.
+- Textos como "frete grátis" não recebem tratamento especial.
+
+ENCERRAMENTO
+- Seletor principal: .arco-icon-im_close_chat
+- Fallbacks: close_chat e im_close.
+- Confirmação por Encerrar agora, Confirmar, Sim e End now.
+- Tentativas emergenciais do timer permanecem ativas.
+
+TELEGRAM
+- Token e Chat ID lidos diretamente do chrome.storage.local.
+- Teste salva antes de enviar.
+- Erros reais da API aparecem no painel.
+- Eventos de início, venda, aviso e encerramento usam a mesma função.
+
+PERMISSÕES
+- Removido admin.valoranegocios.com.br do manifest.
+- TikTok liberado em todos os subdomínios.
+- API movida para api.valoranegocios.com.br.
+
+IMPORTANTE
+- Criar registro DNS A para api.valoranegocios.com.br apontando ao VPS.
+- Instalar o arquivo nginx/api.valoranegocios.com.br.conf.
+- Emitir SSL com Certbot.
+
+Servidor: 3.1.0
+Extensão: 3.1.0

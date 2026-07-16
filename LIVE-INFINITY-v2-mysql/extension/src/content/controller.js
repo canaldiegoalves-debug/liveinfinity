@@ -113,16 +113,15 @@ const OrionContentAutomation = {
         this.commentIndex % comments.length;
 
       const message = comments[selectedIndex];
-      let result={ok:false,error:"Envio não iniciado."};
+      let result = await OrionDetector.sendChat(message);
 
-      for(let attempt=1;attempt<=3;attempt+=1){
-        result=await OrionDetector.sendChat(message);
-        if(result.ok)break;
-        if(attempt<3)await OrionDetector.wait(1200);
+      if (!result.ok && result.retryable) {
+        await OrionDetector.wait(1200);
+        result = await OrionDetector.sendChat(message);
       }
 
-      // Avança somente depois do envio confirmado.
-      // Se falhar, o mesmo comentário permanece na fila.
+      // Ordem fixa: primeiro, segundo, terceiro...
+      // Só avança quando a rotina de envio foi executada.
       if (result.ok) {
         this.commentIndex =
           (this.commentIndex + 1) % comments.length;
@@ -369,8 +368,6 @@ const OrionContentAutomation = {
         chrome.runtime.sendMessage({
           type: "ORION_TELEGRAM_SEND",
           payload: {
-            token: this.settings.telegramToken,
-            chatId: this.settings.telegramChatId,
             text: "🛡️ A LIVE foi iniciada e a proteção contra violação foi ativada automaticamente."
           }
         }).catch(() => {});

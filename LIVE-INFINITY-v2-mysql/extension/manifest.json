@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Live Infinity",
-  "version": "3.0.2",
+  "version": "3.1.0",
   "description": "Automação inteligente para lives de vendas.",
   "minimum_chrome_version": "120",
   "permissions": [
@@ -12,9 +12,9 @@
     "tabs"
   ],
   "host_permissions": [
-    "https://shop.tiktok.com/*",
+    "*://*.tiktok.com/*",
     "https://api.telegram.org/*",
-    "https://admin.valoranegocios.com.br/*"
+    "https://api.valoranegocios.com.br/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.js",
@@ -23,7 +23,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://shop.tiktok.com/*"
+        "*://*.tiktok.com/*"
       ],
       "js": [
         "src/shared/constants.js",

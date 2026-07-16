@@ -1,5 +1,5 @@
 window.ORION = {
-  API_BASE_URL: "https://admin.valoranegocios.com.br",
+  API_BASE_URL: "https://api.valoranegocios.com.br",
   CHANNEL: "ORION_CHANNEL",
   STORAGE: {
     LICENSE: "orionLicense",
