@@ -1,0 +1,10 @@
+LIVE INFINITY v4.2.3 — TIMER AUTOARMADO
+
+- O timer não depende mais do botão Iniciar sessão.
+- Qualquer horário futuro salvo arma o encerramento automaticamente.
+- O watchdog continua verificando a cada 250 ms.
+- O snapshot do horário final continua preservado.
+- Timer vencido antes do carregamento continua sendo descartado.
+
+Servidor: 4.2.3
+Extensão: 4.2.3

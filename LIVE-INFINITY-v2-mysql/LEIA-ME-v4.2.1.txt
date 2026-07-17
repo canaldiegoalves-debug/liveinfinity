@@ -1,0 +1,13 @@
+LIVE INFINITY v4.2.1 — SESSÃO ARMADA
+
+- Atualizar a página desarma completamente o encerramento.
+- Timer só funciona depois de clicar em Iniciar sessão.
+- Timer antigo ou vencido nunca fecha uma nova sessão.
+- Encerramento só ocorre quando o timer atual chegar a zero.
+- Avisos comuns são ignorados.
+- Avisos só encerram com palavras críticas reais:
+  violação, penalidade, suspensão, banimento ou risco à transmissão.
+- Avisos dos primeiros 30 segundos são ignorados.
+
+Servidor: 4.2.1
+Extensão: 4.2.1

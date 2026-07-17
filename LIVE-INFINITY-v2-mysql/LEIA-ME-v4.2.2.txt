@@ -1,0 +1,17 @@
+LIVE INFINITY v4.2.2 — TIMER ZERO CONFIÁVEL
+
+Causa corrigida:
+A interface limpava endTimerAt ao chegar em zero e
+cancelava o encerramento antes do clique.
+
+Nova implementação:
+- O núcleo guarda uma cópia do horário final.
+- A interface pode mostrar Inativo sem desarmar o núcleo.
+- Watchdog verifica o zero a cada 250 ms.
+- setTimeout e watchdog trabalham juntos.
+- O encerramento é disparado apenas uma vez.
+- Iniciar nova sessão apaga snapshots antigos.
+- O clique de encerramento continua usando o fluxo LiveFlow.
+
+Servidor: 4.2.2
+Extensão: 4.2.2

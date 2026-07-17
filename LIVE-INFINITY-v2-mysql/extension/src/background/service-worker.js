@@ -150,3 +150,223 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 });
+
+// ================================================================
+// TIMER LIVEFLOW — ÚNICO DONO DO CRONÔMETRO
+// ================================================================
+
+let liveFlowTimerInterval = null;
+let liveFlowTimerSeconds = 0;
+let liveFlowTimerRunning = false;
+let liveFlowTimerPaused = false;
+let liveFlowTimerSignature = "";
+
+function stopLiveFlowTimer() {
+  clearInterval(liveFlowTimerInterval);
+  liveFlowTimerInterval = null;
+  liveFlowTimerRunning = false;
+}
+
+function secondsText(totalSeconds) {
+  const value = Math.max(
+    0,
+    Number(totalSeconds || 0)
+  );
+
+  const hours = Math.floor(
+    value / 3600
+  );
+
+  const minutes = Math.floor(
+    (value % 3600) / 60
+  );
+
+  const seconds = value % 60;
+
+  return [
+    hours,
+    minutes,
+    seconds
+  ]
+    .map(item =>
+      String(item).padStart(2, "0")
+    )
+    .join(":");
+}
+
+function sendLiveFlowContent(
+  action,
+  data = {}
+) {
+  chrome.tabs.query(
+    {
+      url: "*://*.tiktok.com/*"
+    },
+    tabs => {
+      if (!tabs || !tabs.length) return;
+
+      const target =
+        tabs.find(tab =>
+          /streamer|console|live/i.test(
+            tab.url || ""
+          )
+        ) || tabs[0];
+
+      chrome.tabs.sendMessage(
+        target.id,
+        {
+          action,
+          data
+        },
+        () => {
+          void chrome.runtime.lastError;
+        }
+      );
+    }
+  );
+}
+
+function startLiveFlowTimer(
+  durationSeconds,
+  signature
+) {
+  stopLiveFlowTimer();
+
+  liveFlowTimerSeconds = Math.max(
+    0,
+    Math.round(durationSeconds)
+  );
+
+  liveFlowTimerSignature =
+    String(signature || "");
+
+  liveFlowTimerRunning =
+    liveFlowTimerSeconds > 0;
+
+  liveFlowTimerPaused = false;
+
+  if (!liveFlowTimerRunning) return;
+
+  liveFlowTimerInterval = setInterval(
+    () => {
+      if (!liveFlowTimerRunning) {
+        stopLiveFlowTimer();
+        return;
+      }
+
+      if (liveFlowTimerPaused) return;
+
+      liveFlowTimerSeconds -= 1;
+
+      if (liveFlowTimerSeconds <= 0) {
+        stopLiveFlowTimer();
+
+        sendLiveFlowContent(
+          "encerrarLive",
+          {}
+        );
+
+        sendLiveFlowContent(
+          "timerZerou",
+          {}
+        );
+
+        return;
+      }
+
+      sendLiveFlowContent(
+        "timerTick",
+        {
+          secs: liveFlowTimerSeconds,
+          str: secondsText(
+            liveFlowTimerSeconds
+          )
+        }
+      );
+    },
+    1000
+  );
+}
+
+function configureLiveFlowTimer(
+  settings
+) {
+  const endAt = Number(
+    settings.endTimerAt || 0
+  );
+
+  const paused = Boolean(
+    settings.endTimerPaused
+  );
+
+  if (
+    paused &&
+    liveFlowTimerRunning
+  ) {
+    liveFlowTimerPaused = true;
+    return;
+  }
+
+  if (
+    !paused &&
+    liveFlowTimerRunning
+  ) {
+    liveFlowTimerPaused = false;
+  }
+
+  if (endAt > Date.now()) {
+    const signature =
+      `${endAt}:${paused}`;
+
+    if (
+      signature ===
+      liveFlowTimerSignature
+    ) {
+      return;
+    }
+
+    const durationSeconds =
+      Math.max(
+        1,
+        Math.ceil(
+          (endAt - Date.now()) / 1000
+        )
+      );
+
+    startLiveFlowTimer(
+      durationSeconds,
+      signature
+    );
+
+    liveFlowTimerPaused = paused;
+    return;
+  }
+
+  if (liveFlowTimerRunning) return;
+
+  stopLiveFlowTimer();
+}
+
+chrome.storage.local.get(
+  ["orionSettings"],
+  data => {
+    configureLiveFlowTimer(
+      data.orionSettings || {}
+    );
+  }
+);
+
+chrome.storage.onChanged.addListener(
+  (changes, areaName) => {
+    if (
+      areaName !== "local" ||
+      !changes.orionSettings
+    ) {
+      return;
+    }
+
+    configureLiveFlowTimer(
+      changes.orionSettings.newValue || {}
+    );
+  }
+);

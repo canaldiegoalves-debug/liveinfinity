@@ -1,0 +1,21 @@
+LIVE INFINITY v5.0.0 — MÓDULOS LIVEFLOW INTEGRAIS
+
+Mantidos do Live Infinity:
+- Licenciamento
+- Painel
+- Planos
+- Atualizações
+- API
+
+Substituídos pelo núcleo LiveFlow:
+- Comentários
+- Auto-fix
+- Timer
+- Encerramento
+
+O background é o único dono do cronômetro.
+O content script é o único dono dos cliques.
+Ao zerar, o background envia encerrarLive e timerZerou.
+
+Servidor: 5.0.0
+Extensão: 5.0.0
