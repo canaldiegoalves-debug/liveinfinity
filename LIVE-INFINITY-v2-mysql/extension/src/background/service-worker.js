@@ -150,3 +150,142 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 });
+
+
+// ================================================================
+// LIVEFLOW BACKGROUND TIMER
+// ================================================================
+let liveFlowTimerInterval = null;
+let liveFlowTimerEndAt = 0;
+let liveFlowTimerPaused = false;
+let liveFlowTimerTriggered = false;
+
+function stopLiveFlowTimerBG() {
+  clearInterval(liveFlowTimerInterval);
+  liveFlowTimerInterval = null;
+}
+
+function sendToTikTokContent(action, data = {}) {
+  chrome.tabs.query(
+    { url: "*://*.tiktok.com/*" },
+    tabs => {
+      if (!tabs || !tabs.length) return;
+
+      const targetTab =
+        tabs.find(tab =>
+          /streamer|console|live/i.test(tab.url || "")
+        ) || tabs[0];
+
+      chrome.tabs.sendMessage(
+        targetTab.id,
+        { action, data },
+        () => {
+          void chrome.runtime.lastError;
+        }
+      );
+    }
+  );
+}
+
+function startLiveFlowTimerBG(endAt, paused = false) {
+  stopLiveFlowTimerBG();
+
+  liveFlowTimerEndAt = Number(endAt || 0);
+  liveFlowTimerPaused = Boolean(paused);
+  liveFlowTimerTriggered = false;
+
+  if (
+    !liveFlowTimerEndAt ||
+    liveFlowTimerEndAt <= Date.now()
+  ) {
+    return;
+  }
+
+  liveFlowTimerInterval = setInterval(() => {
+    if (liveFlowTimerPaused) return;
+    if (liveFlowTimerTriggered) {
+      stopLiveFlowTimerBG();
+      return;
+    }
+
+    const remainingMs =
+      liveFlowTimerEndAt - Date.now();
+
+    if (remainingMs <= 0) {
+      liveFlowTimerTriggered = true;
+      stopLiveFlowTimerBG();
+
+      // Fluxo igual ao LiveFlow:
+      // primeiro manda encerrarLive, depois timerZerou.
+      sendToTikTokContent("encerrarLive", {});
+      sendToTikTokContent("timerZerou", {});
+
+      return;
+    }
+  }, 250);
+}
+
+chrome.storage.local.get(
+  ["orionSettings"],
+  data => {
+    const settings = data.orionSettings || {};
+    const endAt = Number(settings.endTimerAt || 0);
+
+    if (
+      endAt > Date.now() &&
+      !settings.endTimerPaused
+    ) {
+      startLiveFlowTimerBG(
+        endAt,
+        settings.endTimerPaused
+      );
+    }
+  }
+);
+
+chrome.storage.onChanged.addListener(
+  (changes, areaName) => {
+    if (
+      areaName !== "local" ||
+      !changes.orionSettings
+    ) {
+      return;
+    }
+
+    const settings =
+      changes.orionSettings.newValue || {};
+
+    const endAt =
+      Number(settings.endTimerAt || 0);
+
+    if (
+      endAt > Date.now()
+    ) {
+      startLiveFlowTimerBG(
+        endAt,
+        settings.endTimerPaused
+      );
+      return;
+    }
+
+    // Se a interface limpar o horário no exato zero,
+    // preserva o timer já armado até ele disparar.
+    if (
+      liveFlowTimerEndAt > 0 &&
+      !liveFlowTimerTriggered &&
+      Date.now() < liveFlowTimerEndAt
+    ) {
+      liveFlowTimerPaused =
+        Boolean(settings.endTimerPaused);
+      return;
+    }
+
+    if (
+      liveFlowTimerTriggered ||
+      !liveFlowTimerEndAt
+    ) {
+      stopLiveFlowTimerBG();
+    }
+  }
+);
+

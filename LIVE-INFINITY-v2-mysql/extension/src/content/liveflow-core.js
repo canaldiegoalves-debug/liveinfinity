@@ -16,7 +16,7 @@
   let armedTimerEndAt = 0;
   let timerEndTriggered = false;
   let warningLock = false;
-  let sessionArmed = false;
+  let sessionArmed = true;
   let pageLoadedAt = Date.now();
 
   function random(min, max) {
@@ -511,86 +511,9 @@
   // TIMER — única origem autorizada
   // ================================================================
 
-  function stopTimerWatchdog() {
-    clearTimeout(timerTimeout);
-    clearInterval(timerWatchdog);
-
-    timerTimeout = null;
-    timerWatchdog = null;
-  }
-
-  function triggerTimerEnd() {
-    if (
-      !sessionArmed ||
-      !armedTimerEndAt ||
-      timerEndTriggered ||
-      Date.now() < armedTimerEndAt
-    ) {
-      return;
-    }
-
-    timerEndTriggered = true;
-    stopTimerWatchdog();
-
-    // O horário fica preservado no núcleo mesmo que a interface
-    // já tenha limpado endTimerAt e mostrado "Inativo".
-    endLive();
-  }
-
   function configureTimer() {
-    if (!sessionArmed) {
-      stopTimerWatchdog();
-      armedTimerEndAt = 0;
-      timerEndTriggered = false;
-      return;
-    }
-
-    const storedEndAt = Number(
-      settings.endTimerAt || 0
-    );
-
-    // Um novo timer futuro substitui o snapshot anterior.
-    if (
-      storedEndAt > Date.now() &&
-      !settings.endTimerPaused
-    ) {
-      armedTimerEndAt = storedEndAt;
-      timerEndTriggered = false;
-
-      stopTimerWatchdog();
-
-      const remaining =
-        Math.max(0, armedTimerEndAt - Date.now());
-
-      timerTimeout = setTimeout(
-        triggerTimerEnd,
-        remaining
-      );
-
-      // Segunda camada: não depende do setTimeout nem do estado
-      // que a interface salvar ao chegar em 00:00.
-      timerWatchdog = setInterval(
-        triggerTimerEnd,
-        250
-      );
-
-      return;
-    }
-
-    // Quando a interface limpa o timer exatamente no zero,
-    // preserva o snapshot armado e executa o encerramento.
-    if (
-      armedTimerEndAt > 0 &&
-      !timerEndTriggered
-    ) {
-      if (Date.now() >= armedTimerEndAt) {
-        triggerTimerEnd();
-      }
-
-      return;
-    }
-
-    stopTimerWatchdog();
+    // Cronômetro controlado exclusivamente pelo background,
+    // igual ao fluxo funcional do LiveFlow.
   }
 
   function applySettings(nextSettings) {
@@ -641,12 +564,20 @@
   chrome.storage.local.get(
     STORAGE_KEY,
     data => {
-      sessionArmed = false;
       pageLoadedAt = Date.now();
 
-      applySettings(
-        data[STORAGE_KEY] || {}
+      const initialSettings =
+        data[STORAGE_KEY] || {};
+
+      const initialEndAt = Number(
+        initialSettings.endTimerAt || 0
       );
+
+      sessionArmed =
+        initialEndAt > Date.now() &&
+        !initialSettings.endTimerPaused;
+
+      applySettings(initialSettings);
     }
   );
 
@@ -659,9 +590,21 @@
         return;
       }
 
-      applySettings(
-        changes[STORAGE_KEY].newValue || {}
+      const nextSettings =
+        changes[STORAGE_KEY].newValue || {};
+
+      const nextEndAt = Number(
+        nextSettings.endTimerAt || 0
       );
+
+      if (
+        nextEndAt > Date.now() &&
+        !nextSettings.endTimerPaused
+      ) {
+        sessionArmed = true;
+      }
+
+      applySettings(nextSettings);
     }
   );
 
@@ -669,11 +612,6 @@
   window.addEventListener(
     "LIVE_INFINITY_SESSION_START",
     () => {
-      sessionArmed = true;
-      timerEndTriggered = false;
-      armedTimerEndAt = 0;
-      stopTimerWatchdog();
-
       chrome.storage.local.get(
         STORAGE_KEY,
         data => {
@@ -698,19 +636,7 @@
       const reason =
         event.detail?.reason || "";
 
-      if (reason === "timer-zero") {
-        const endAt =
-          armedTimerEndAt ||
-          Number(settings.endTimerAt || 0);
-
-        if (
-          endAt > 0 &&
-          Date.now() >= endAt
-        ) {
-          armedTimerEndAt = endAt;
-          triggerTimerEnd();
-        }
-      }
+      // Timer é tratado exclusivamente pelo background.
 
       // Aviso é tratado exclusivamente pelo evento
       // LIVE_INFINITY_CRITICAL_WARNING abaixo.
@@ -753,4 +679,29 @@
       }, 10000);
     }
   );
+
+  chrome.runtime.onMessage.addListener(
+    (message, sender, sendResponse) => {
+      try {
+        if (message?.action === "encerrarLive") {
+          endLive();
+          sendResponse?.({ ok: true });
+          return true;
+        }
+
+        if (message?.action === "timerZerou") {
+          sendResponse?.({ ok: true });
+          return true;
+        }
+      } catch (error) {
+        sendResponse?.({
+          ok: false,
+          error: error?.message || "Falha ao encerrar a LIVE."
+        });
+      }
+
+      return true;
+    }
+  );
+
 })();
