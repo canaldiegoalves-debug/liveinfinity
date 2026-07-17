@@ -14,6 +14,9 @@ const DEFAULTS = {
   telegramEnabled: false,
   telegramToken: "",
   telegramChatId: "",
+  telegramSalesEnabled: true,
+  telegramViolationEnabled: true,
+  telegramStatusEnabled: true,
   saleSoundEnabled: true,
   autoPinEnabled: false,
   skipCoupons: true,
@@ -40,6 +43,30 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.action.onClicked.addListener(async (tab) => {
   if (tab.id) await chrome.sidePanel.open({ tabId: tab.id });
 });
+
+
+function telegramCategoryEnabled(
+  settings,
+  category
+) {
+  if (!settings.telegramEnabled) {
+    return false;
+  }
+
+  if (category === "sale") {
+    return settings.telegramSalesEnabled !== false;
+  }
+
+  if (category === "violation") {
+    return settings.telegramViolationEnabled !== false;
+  }
+
+  if (category === "status") {
+    return settings.telegramStatusEnabled !== false;
+  }
+
+  return true;
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (
@@ -69,6 +96,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const text = String(
         message?.payload?.text || ""
       ).trim();
+
+      const category = String(
+        message?.payload?.category || ""
+      ).trim();
+
+      if (
+        category &&
+        !telegramCategoryEnabled(
+          settings,
+          category
+        )
+      ) {
+        sendResponse({
+          ok: false,
+          skipped: true,
+          error:
+            "Esta categoria de notificação está desativada."
+        });
+        return;
+      }
 
       if (!token || !chatId || !text) {
         sendResponse({

@@ -1,0 +1,29 @@
+LIVE INFINITY v5.0.2
+
+FIXAÇÃO
+- Ignorar cupom voltou a ser obrigatório.
+- Bloqueia cupom, voucher, desconto, frete grátis e promoções.
+- Só aceita botão dentro de uma linha com características reais de produto:
+  imagem, preço e estoque/vendas.
+- Fixa apenas o produto principal.
+
+COMENTÁRIOS
+- A barra começa imediatamente ao clicar em Iniciar comentários.
+- O tempo real continua sendo controlado pelo núcleo sequencial.
+
+TELEGRAM
+- Layout copiado do padrão LiveFlow.
+- Token do Bot e Chat ID.
+- Tela verde de confirmação.
+- Botão Editar configuração.
+- Toggles de vendas, violações e início/fim da LIVE.
+- Botão Testar notificação agora.
+- Configuração salva no computador.
+
+PRESERVADOS:
+- Timer no background.
+- Encerramento e confirmação.
+- Ordem dos comentários.
+
+Servidor: 5.0.2
+Extensão: 5.0.2

@@ -276,7 +276,8 @@ async function load(){
     }
   }
 }
-async function saveSettings(){await chrome.storage.local.set({[ORION.STORAGE.SETTINGS]:state.settings})}
+async function saveSettings(){
+  state.settings.skipCoupons=true;await chrome.storage.local.set({[ORION.STORAGE.SETTINGS]:state.settings})}
 async function saveCollapse(){await chrome.storage.local.set({[ORION.STORAGE.COLLAPSE]:state.collapse})}
 function valid(){return !!(state.license?.active&&new Date(state.license.expiresAt)>new Date())}
 function pro(){return ["pro","premium"].includes(String(state.license?.plan||"").toLowerCase())}
@@ -592,7 +593,13 @@ function home(){
 
   ${section("product","📌","Fixação de Produto","controle rápido do produto atual",`
     <div class="toggle-line"><span>Fixar Produto #1</span><input id="auto-pin" class="toggle" type="checkbox" ${state.settings.autoPinEnabled?"checked":""}></div>
-    <div class="toggle-line"><span>Ignorar cupons de desconto</span><input id="skip-coupons" class="toggle" type="checkbox" ${state.settings.skipCoupons!==false?"checked":""}></div>
+    <div class="toggle-line mandatory-coupon-rule">
+      <div>
+        <strong>Ignorar cupons de desconto</strong>
+        <p class="helper">Proteção obrigatória: cupons, vouchers, descontos e frete grátis nunca serão fixados.</p>
+      </div>
+      <input id="skip-coupons" class="toggle" type="checkbox" checked disabled>
+    </div>
     <p class="helper">Ignora linhas com cupom, voucher ou desconto e procura a primeira linha com preço, estoque e imagem de produto.</p>
     <p class="helper">Produto detectado: ${esc(state.live.product||"nenhum")}</p>
     <p id="product-auto-status" class="helper">${state.settings.autoPinEnabled?"Ativa: usa o botão DESAFIXAR como confirmação e refaz o ciclo a cada 20 segundos.":"Fixação automática desativada."}</p>
@@ -723,70 +730,135 @@ function home(){
     </div>
   `,false)}
 
-  ${section("telegram","✈️","Notificações Telegram","receba alertas diretamente no celular",`
-    <div class="telegram-status-card ${state.settings.telegramEnabled&&state.settings.telegramToken&&state.settings.telegramChatId?"configured":"pending"}">
-      <div class="telegram-status-icon">
-        ${state.settings.telegramEnabled&&state.settings.telegramToken&&state.settings.telegramChatId?"✅":"✈️"}
+  ${section("telegram","✈️","Notificações Telegram","Receba alertas de venda e violação no celular",`
+    <div class="liveflow-telegram-header">
+      <div>
+        <strong>✈️ Notificações Telegram</strong>
+        <p>Receba alertas de venda e violação no celular</p>
+      </div>
+      <span
+        id="telegram-badge"
+        class="telegram-liveflow-badge ${state.settings.telegramEnabled&&state.settings.telegramToken&&state.settings.telegramChatId?"active":"inactive"}"
+      >
+        ${state.settings.telegramEnabled&&state.settings.telegramToken&&state.settings.telegramChatId?"Ativo":"Inativo"}
+      </span>
+    </div>
+
+    <div
+      id="telegram-form-box"
+      class="${state.settings.telegramToken&&state.settings.telegramChatId?"hidden-telegram-box":""}"
+    >
+      <label class="telegram-liveflow-label">
+        🤖 Token do Bot
+        <input
+          id="telegram-token"
+          type="text"
+          value="${esc(state.settings.telegramToken)}"
+          placeholder="Ex: 8604787663:AAEiSf0juY..."
+        >
+      </label>
+
+      <label class="telegram-liveflow-label">
+        💬 Seu Chat ID
+        <input
+          id="telegram-chat"
+          type="text"
+          value="${esc(state.settings.telegramChatId)}"
+          placeholder="Ex: 1071972751"
+        >
+      </label>
+
+      <button
+        id="save-telegram"
+        class="btn-primary telegram-full-button"
+      >
+        💾 Salvar configuração
+      </button>
+
+      <details class="telegram-liveflow-help">
+        <summary>📖 Como configurar notificações?</summary>
+        <div>
+          <strong>Passo 1 — Criar seu Bot</strong>
+          <p>1. Abra o Telegram e acesse <b>@BotFather</b>.</p>
+          <p>2. Envie <code>/newbot</code>.</p>
+          <p>3. Escolha um nome e um username terminado em <b>bot</b>.</p>
+          <p>4. Copie o Token recebido e cole acima.</p>
+
+          <strong>Passo 2 — Pegar seu Chat ID</strong>
+          <p>1. Abra <b>@userinfobot</b>.</p>
+          <p>2. Envie qualquer mensagem.</p>
+          <p>3. Copie o número do campo <b>Id</b>.</p>
+
+          <strong>Passo 3 — Ativar</strong>
+          <p>1. Salve a configuração.</p>
+          <p>2. Clique em Testar notificação.</p>
+          <p>3. Recebeu? Está pronto.</p>
+        </div>
+      </details>
+    </div>
+
+    <div
+      id="telegram-confirm-box"
+      class="telegram-confirm-box ${state.settings.telegramToken&&state.settings.telegramChatId?"":"hidden-telegram-box"}"
+    >
+      <div class="telegram-success-card">
+        <div>✅</div>
+        <strong>Telegram configurado!</strong>
+        <p>Notificações de venda, violação e início/fim de live estão ativas.</p>
       </div>
 
-      <strong>
-        ${state.settings.telegramEnabled&&state.settings.telegramToken&&state.settings.telegramChatId
-          ?"Telegram configurado!"
-          :"Telegram ainda não configurado"}
-      </strong>
-
-      <p>
-        ${state.settings.telegramEnabled&&state.settings.telegramToken&&state.settings.telegramChatId
-          ?"Notificações de venda, violação e encerramento estão prontas."
-          :"Configure o bot para receber alertas no celular."}
-      </p>
+      <button
+        id="edit-telegram"
+        class="btn-secondary telegram-full-button"
+      >
+        ✏️ Editar configuração
+      </button>
     </div>
 
-    <div class="telegram-alert-list">
-      <label><input id="telegram-enabled" type="checkbox" ${state.settings.telegramEnabled?"checked":""}> Ativar notificações</label>
-      <span>✔ Venda realizada</span>
-      <span>✔ Violação detectada</span>
-      <span>✔ Live iniciada</span>
-      <span>✔ Live encerrada</span>
-    </div>
-
-    <div class="telegram-config-fields">
-      <label>Token do Bot
-        <input id="telegram-token" type="password" value="${esc(state.settings.telegramToken)}" placeholder="123456789:AA...">
+    <div class="telegram-liveflow-toggles">
+      <label>
+        <span>🛒 Notificar novas vendas</span>
+        <input
+          id="telegram-sales"
+          class="toggle"
+          type="checkbox"
+          ${state.settings.telegramSalesEnabled!==false?"checked":""}
+        >
       </label>
 
-      <label>Chat ID
-        <input id="telegram-chat" value="${esc(state.settings.telegramChatId)}" placeholder="123456789">
+      <label>
+        <span>🔴 Notificar violações</span>
+        <input
+          id="telegram-violations"
+          class="toggle"
+          type="checkbox"
+          ${state.settings.telegramViolationEnabled!==false?"checked":""}
+        >
+      </label>
+
+      <label>
+        <span>▶ Notificar início/fim de live</span>
+        <input
+          id="telegram-status"
+          class="toggle"
+          type="checkbox"
+          ${state.settings.telegramStatusEnabled!==false?"checked":""}
+        >
       </label>
     </div>
 
-    <div class="actions telegram-actions">
-      <button id="save-telegram" class="btn-primary">💾 Salvar configuração</button>
-      <button id="test-telegram" class="btn-secondary">🧪 Testar envio</button>
-    </div>
+    <button
+      id="test-telegram"
+      class="btn-primary telegram-full-button"
+    >
+      📨 Testar notificação agora
+    </button>
+
     <p id="telegram-save-status" class="helper">
       ${state.settings.telegramToken&&state.settings.telegramChatId
         ?"Configuração salva neste computador."
-        :"Preencha os campos e clique em Salvar configuração."}
+        :"Preencha o Token e o Chat ID."}
     </p>
-
-    <details class="telegram-tutorial">
-      <summary>📖 Como configurar o Telegram</summary>
-      <div class="tutorial-content">
-        <p><strong>1.</strong> Procure por <code>@BotFather</code> e envie <code>/newbot</code>.</p>
-        <p><strong>2.</strong> Copie o Token fornecido pelo BotFather.</p>
-        <p><strong>3.</strong> Procure por <code>@userinfobot</code> e copie seu Chat ID.</p>
-        <p><strong>4.</strong> Abra o bot criado e envie uma mensagem como <code>Olá</code>.</p>
-        <p><strong>5.</strong> Preencha os campos acima e clique em Testar envio.</p>
-
-        <div class="actions">
-          <button id="download-cash-sound" class="btn-secondary" type="button">🔊 Baixar som de caixa registradora</button>
-          <button id="test-cash-sound" class="btn-secondary" type="button">▶ Ouvir som</button>
-        </div>
-
-        <p id="cash-sound-status" class="helper"></p>
-      </div>
-    </details>
   `)}
 
   ${section("protection","🛡️","Proteção da Live","encerra a live ao detectar aviso crítico",`
@@ -999,7 +1071,7 @@ function bind(){
     if(message)message.textContent=e.target.checked?"Ativa: usa o botão DESAFIXAR como confirmação e refaz o ciclo a cada 20 segundos.":"Fixação automática desativada.";
     if(e.target.checked)await post("ORION_PIN_PRODUCT",{skipCoupons:state.settings.skipCoupons!==false});
   });
-  document.getElementById("skip-coupons")?.addEventListener("change",async e=>{state.settings.skipCoupons=e.target.checked;await saveSettings()});
+  
   document.getElementById("protection-save")?.addEventListener("click",async()=>{
     state.settings.protectionEnabled=document.getElementById("protection-enabled").checked;
     state.settings.protectionTelegram=document.getElementById("protection-telegram").checked;
@@ -1148,6 +1220,34 @@ function bind(){
     );
     state.settings.commentsEnabled=true;
 
+    // A barra começa imediatamente no clique.
+    const immediateDelay=
+      Math.floor(
+        Math.random()*
+        (
+          state.settings.maxCommentDelay-
+          state.settings.minCommentDelay+1
+        )
+      )+
+      state.settings.minCommentDelay;
+
+    updateCommentProgress({
+      kind:"comment-started",
+      totalComments:comments.length,
+      intervalMin:state.settings.minCommentDelay,
+      intervalMax:state.settings.maxCommentDelay
+    });
+
+    updateCommentProgress({
+      kind:"comment-progress",
+      progress:0,
+      remainingSeconds:immediateDelay,
+      delaySeconds:immediateDelay,
+      currentIndex:0,
+      totalComments:comments.length,
+      nextComment:comments[0]
+    });
+
     await saveSettings();
 
     const status=document.getElementById("comments-status");
@@ -1162,68 +1262,111 @@ function bind(){
   document.getElementById("save-telegram")?.addEventListener("click",async()=>{
     const token=document.getElementById("telegram-token")?.value.trim()||"";
     const chatId=document.getElementById("telegram-chat")?.value.trim()||"";
-    const enabled=Boolean(
-      document.getElementById("telegram-enabled")?.checked
-    );
-
-    const status=document.getElementById("telegram-save-status");
-
-    if(enabled&&(!token||!chatId)){
-      if(status){
-        status.textContent=
-          "Preencha o Token do Bot e o Chat ID antes de ativar.";
-      }
-      return;
-    }
-
-    state.settings.telegramEnabled=enabled;
-    state.settings.telegramToken=token;
-    state.settings.telegramChatId=chatId;
-
-    await saveSettings();
-
-    if(status){
-      status.textContent=
-        token&&chatId
-          ?"✅ Configurações do Telegram salvas com sucesso."
-          :"Configuração do Telegram removida.";
-    }
-  });
-
-  document.getElementById("test-telegram")?.addEventListener("click",async()=>{
-    const token=document.getElementById("telegram-token")?.value.trim()||"";
-    const chatId=document.getElementById("telegram-chat")?.value.trim()||"";
     const status=document.getElementById("telegram-save-status");
 
     if(!token||!chatId){
-      if(status)status.textContent="Preencha o Token do Bot e o Chat ID.";
+      if(status){
+        status.textContent=
+          "Preencha o Token do Bot e o Chat ID.";
+      }
       return;
     }
 
     state.settings.telegramToken=token;
     state.settings.telegramChatId=chatId;
     state.settings.telegramEnabled=true;
-
-    const enabledInput=document.getElementById("telegram-enabled");
-    if(enabledInput)enabledInput.checked=true;
+    state.settings.telegramSalesEnabled=
+      document.getElementById("telegram-sales")?.checked!==false;
+    state.settings.telegramViolationEnabled=
+      document.getElementById("telegram-violations")?.checked!==false;
+    state.settings.telegramStatusEnabled=
+      document.getElementById("telegram-status")?.checked!==false;
 
     await saveSettings();
 
-    if(status)status.textContent="Testando conexão...";
+    if(status){
+      status.textContent=
+        "✅ Configuração do Telegram salva.";
+    }
+
+    render();
+  });
+
+  document.getElementById("edit-telegram")?.addEventListener("click",()=>{
+    document
+      .getElementById("telegram-form-box")
+      ?.classList.remove("hidden-telegram-box");
+
+    document
+      .getElementById("telegram-confirm-box")
+      ?.classList.add("hidden-telegram-box");
+  });
+
+  for(const [id,key] of [
+    ["telegram-sales","telegramSalesEnabled"],
+    ["telegram-violations","telegramViolationEnabled"],
+    ["telegram-status","telegramStatusEnabled"]
+  ]){
+    document.getElementById(id)?.addEventListener("change",async event=>{
+      state.settings[key]=event.target.checked;
+      state.settings.telegramEnabled=Boolean(
+        state.settings.telegramToken&&
+        state.settings.telegramChatId
+      );
+      await saveSettings();
+    });
+  }
+
+  document.getElementById("test-telegram")?.addEventListener("click",async()=>{
+    const token=
+      document.getElementById("telegram-token")?.value.trim()||
+      state.settings.telegramToken||
+      "";
+
+    const chatId=
+      document.getElementById("telegram-chat")?.value.trim()||
+      state.settings.telegramChatId||
+      "";
+
+    const status=
+      document.getElementById("telegram-save-status");
+
+    if(!token||!chatId){
+      if(status){
+        status.textContent=
+          "Preencha e salve o Token do Bot e o Chat ID.";
+      }
+      return;
+    }
+
+    state.settings.telegramToken=token;
+    state.settings.telegramChatId=chatId;
+    state.settings.telegramEnabled=true;
+    await saveSettings();
+
+    if(status){
+      status.textContent=
+        "Enviando notificação de teste...";
+    }
 
     const result=await chrome.runtime.sendMessage({
       type:"ORION_TELEGRAM_SEND",
       payload:{
-        text:"✅ Live Infinity conectado com sucesso!"
+        token,
+        chatId,
+        text:
+          "✅ Live Infinity conectado com sucesso!\n\n🛒 Vendas: ativas\n🔴 Violações: ativas\n▶ Início/fim da LIVE: ativos"
       }
     }).catch(error=>({
       ok:false,
-      error:error?.message||"Falha ao testar o Telegram."
+      error:
+        error?.message||
+        "Falha ao testar o Telegram."
     }));
 
     if(status){
       status.textContent=result?.ok
-        ?"✅ Conexão testada e configurações salvas."
+        ?"✅ Notificação recebida. Telegram configurado!"
         :`❌ ${result?.error||"Não foi possível enviar a mensagem."}`;
     }
   });

@@ -25,14 +25,164 @@
     ).trim().toLowerCase();
   }
 
+  function actionContainer(element) {
+    if (!element) return null;
+
+    return (
+      element.closest(
+        [
+          "tr",
+          "li",
+          "[data-row-key]",
+          "[class*='product-card']",
+          "[class*='productCard']",
+          "[class*='product-item']",
+          "[class*='productItem']",
+          "[class*='goods']",
+          "[class*='item-card']",
+          "[class*='itemCard']",
+          "[class*='coupon']",
+          "[class*='voucher']"
+        ].join(",")
+      ) ||
+      element.parentElement?.parentElement ||
+      element.parentElement ||
+      element
+    );
+  }
+
   function isCoupon(element) {
     const container =
-      element?.closest?.(
-        "tr,li,[class*='product'],[class*='item'],[class*='card'],[class*='coupon']"
-      ) || element;
+      actionContainer(element);
 
-    return /cupom|coupon|voucher|desconto|discount/.test(
-      textOf(container)
+    const text = textOf(container);
+
+    const couponWords =
+      /cupom|coupon|voucher|desconto|discount|oferta relâmpago|oferta relampago|promo code|código promocional|codigo promocional|frete grátis|frete gratis|shipping voucher/;
+
+    const couponClass =
+      /coupon|voucher|discount|promo/i.test(
+        String(container?.className || "")
+      );
+
+    const couponAttribute =
+      /coupon|voucher|discount|promo/i.test(
+        [
+          container?.getAttribute?.("data-type"),
+          container?.getAttribute?.("data-testid"),
+          container?.getAttribute?.("aria-label")
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
+
+    return Boolean(
+      couponWords.test(text) ||
+      couponClass ||
+      couponAttribute
+    );
+  }
+
+  function productScore(element) {
+    const container =
+      actionContainer(element);
+
+    if (!container || isCoupon(container)) {
+      return -999;
+    }
+
+    const text = textOf(container);
+
+    let score = 0;
+
+    if (
+      container.querySelector?.(
+        "img"
+      )
+    ) {
+      score += 5;
+    }
+
+    if (
+      /r\$\s*\d|preço|preco|price/.test(
+        text
+      )
+    ) {
+      score += 4;
+    }
+
+    if (
+      /estoque|stock|vendido|vendidos|sold|unidade|unidades/.test(
+        text
+      )
+    ) {
+      score += 3;
+    }
+
+    if (
+      /produto|product|item/.test(
+        text
+      )
+    ) {
+      score += 2;
+    }
+
+    if (
+      /fixar|pin|desafixar|unpin/.test(
+        text
+      )
+    ) {
+      score += 1;
+    }
+
+    return score;
+  }
+
+  function findMainProductButton(
+    buttons,
+    mode
+  ) {
+    const safeButtons =
+      buttons.filter(button => {
+        if (isCoupon(button)) {
+          return false;
+        }
+
+        const text = textOf(button);
+
+        if (mode === "unpin") {
+          return (
+            text === "desafixar" ||
+            text === "desfixar" ||
+            text === "unpin" ||
+            text.includes("desafix") ||
+            text.includes("unpin")
+          );
+        }
+
+        return (
+          text === "fixar" ||
+          text === "pin" ||
+          text === "fix" ||
+          text.includes("fixar")
+        );
+      });
+
+    return (
+      safeButtons
+        .map(button => ({
+          button,
+          score:
+            productScore(button)
+        }))
+        .filter(item =>
+          item.score >= 5
+        )
+        .sort(
+          (first, second) =>
+            second.score - first.score
+        )[0]?.button ||
+      null
     );
   }
 
@@ -483,17 +633,10 @@
   }
 
   function findSafePinButton(buttons) {
-    return buttons.find(button => {
-      const text = textOf(button);
-
-      const isPin =
-        text === "fixar" ||
-        text === "pin" ||
-        text === "fix" ||
-        text.includes("fixar");
-
-      return isPin && !isCoupon(button);
-    });
+    return findMainProductButton(
+      buttons,
+      "pin"
+    );
   }
 
   function executeAutoFixCycle() {
@@ -505,6 +648,10 @@
         const settings =
           data[STORAGE_KEY] || {};
 
+        // Regra obrigatória:
+        // cupom nunca pode ser fixado.
+        settings.skipCoupons = true;
+
         if (!settings.autoPinEnabled) {
           stopAutoFix();
           return;
@@ -512,19 +659,11 @@
 
         const buttons = allButtons();
 
-        const unpinButton = buttons.find(
-          button => {
-            const text = textOf(button);
-
-            return (
-              text === "desafixar" ||
-              text === "unpin" ||
-              text === "desfixar" ||
-              text.includes("desafix") ||
-              text.includes("unpin")
-            );
-          }
-        );
+        const unpinButton =
+          findMainProductButton(
+            buttons,
+            "unpin"
+          );
 
         if (
           unpinButton &&
@@ -574,13 +713,11 @@
   function pinNow() {
     const buttons = allButtons();
 
-    const unpinButton = buttons.find(
-      button =>
-        /desafixar|desfixar|unpin/.test(
-          textOf(button)
-        ) &&
-        !isCoupon(button)
-    );
+    const unpinButton =
+      findMainProductButton(
+        buttons,
+        "unpin"
+      );
 
     if (unpinButton) {
       unpinButton.click();

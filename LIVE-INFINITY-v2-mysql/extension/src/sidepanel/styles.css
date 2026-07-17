@@ -630,3 +630,157 @@ nav button.active{
   line-height:1.45;
   word-break:break-word;
 }
+
+
+/* ================================================================
+   LIVEFLOW TELEGRAM + COUPON RULE — v5.0.2
+   ================================================================ */
+
+.mandatory-coupon-rule{
+  align-items:center;
+}
+
+.mandatory-coupon-rule input:disabled{
+  opacity:1;
+  cursor:not-allowed;
+}
+
+.liveflow-telegram-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:14px;
+}
+
+.liveflow-telegram-header strong{
+  display:block;
+  color:#fff;
+  font-size:13px;
+}
+
+.liveflow-telegram-header p{
+  margin:3px 0 0;
+  color:var(--muted);
+  font-size:10px;
+}
+
+.telegram-liveflow-badge{
+  padding:4px 9px;
+  border-radius:6px;
+  font-size:9px;
+  font-weight:900;
+}
+
+.telegram-liveflow-badge.active{
+  color:#00e676;
+  border:1px solid rgba(0,230,118,.4);
+  background:rgba(0,230,118,.12);
+}
+
+.telegram-liveflow-badge.inactive{
+  color:#9aa7bb;
+  border:1px solid rgba(150,165,190,.25);
+  background:rgba(150,165,190,.08);
+}
+
+.telegram-liveflow-label{
+  display:grid;
+  gap:5px;
+  margin-bottom:10px;
+  color:var(--muted);
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.5px;
+  text-transform:uppercase;
+}
+
+.telegram-liveflow-label input{
+  width:100%;
+  box-sizing:border-box;
+  font-family:monospace;
+  text-transform:none;
+}
+
+.telegram-full-button{
+  width:100%;
+  margin-bottom:10px;
+}
+
+.telegram-liveflow-help{
+  margin:6px 0 12px;
+}
+
+.telegram-liveflow-help summary{
+  padding:7px 0;
+  color:var(--cyan);
+  cursor:pointer;
+  font-size:11px;
+  font-weight:800;
+}
+
+.telegram-liveflow-help > div{
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:9px;
+  background:rgba(1,10,25,.75);
+  color:var(--muted);
+  font-size:10px;
+  line-height:1.55;
+}
+
+.telegram-liveflow-help strong{
+  display:block;
+  margin:8px 0 5px;
+  color:var(--cyan);
+}
+
+.telegram-liveflow-help p{
+  margin:4px 0;
+}
+
+.telegram-success-card{
+  margin-bottom:12px;
+  padding:16px 14px;
+  border:1px solid rgba(0,200,100,.3);
+  border-radius:10px;
+  background:rgba(0,200,100,.08);
+  text-align:center;
+}
+
+.telegram-success-card > div{
+  margin-bottom:6px;
+  font-size:28px;
+}
+
+.telegram-success-card strong{
+  color:#00e676;
+  font-size:13px;
+}
+
+.telegram-success-card p{
+  margin:5px 0 0;
+  color:var(--muted);
+  font-size:10px;
+  line-height:1.6;
+}
+
+.hidden-telegram-box{
+  display:none!important;
+}
+
+.telegram-liveflow-toggles{
+  display:grid;
+  margin:4px 0 10px;
+}
+
+.telegram-liveflow-toggles label{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:9px 0;
+  border-bottom:1px solid var(--border);
+  color:var(--text);
+  font-size:11px;
+}
