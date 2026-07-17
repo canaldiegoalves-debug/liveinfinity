@@ -784,3 +784,60 @@ nav button.active{
   color:var(--text);
   font-size:11px;
 }
+
+
+/* ================================================================
+   DASHBOARD + STABLE PROGRESS + FROZEN COUPON — v5.0.4
+   ================================================================ */
+
+.top-summary-compact{
+  grid-template-columns:1fr!important;
+}
+
+.summary-dual{
+  display:grid!important;
+  grid-template-columns:1fr 1px 1fr;
+  align-items:center;
+  gap:14px;
+  text-align:center;
+}
+
+.summary-dual > div:not(.summary-divider){
+  display:grid;
+  gap:4px;
+}
+
+.summary-divider{
+  width:1px;
+  height:34px;
+  background:rgba(255,255,255,.13);
+}
+
+.sales-gmv-summary{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin:10px 0 14px;
+}
+
+.sales-gmv-summary .summary{
+  min-height:68px;
+}
+
+.frozen-feature-badge{
+  display:inline-flex;
+  margin-left:5px;
+  padding:2px 6px;
+  border:1px solid rgba(0,230,118,.38);
+  border-radius:999px;
+  color:#00e676;
+  background:rgba(0,230,118,.1);
+  font-size:8px;
+  font-weight:900;
+  letter-spacing:.5px;
+  vertical-align:middle;
+}
+
+.telegram-liveflow-help[open] > div{
+  display:block;
+}

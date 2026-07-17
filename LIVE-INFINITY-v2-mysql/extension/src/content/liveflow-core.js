@@ -999,6 +999,16 @@
         }
 
         if (
+          message?.action === "sendSocialProof"
+        ) {
+          sendComment(
+            String(message.text||"").trim()
+          ).then(sendResponse);
+
+          return true;
+        }
+
+        if (
           message?.action === "fixarProduto"
         ) {
           pinNow();

@@ -773,12 +773,12 @@ window.OrionDetector = {
       settings.telegramChatId
     ) {
       chrome.runtime.sendMessage({
-        type: "ORION_TELEGRAM_SEND",
-        payload: {
-          text:
-            `🚨 Aviso de violação detectado\n` +
-            `${violation.text.slice(0, 500)}\n` +
-            `Ação: ${settings.protectionEnabled ? "proteção automática ativa" : "somente aviso"}`
+        type:"ORION_TELEGRAM_EVENT",
+        payload:{
+          kind:"violation",
+          data:{
+            text:violation.text
+          }
         }
       }).catch(() => {});
     }

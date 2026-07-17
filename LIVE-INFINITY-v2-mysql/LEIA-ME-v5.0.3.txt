@@ -1,0 +1,23 @@
+LIVE INFINITY v5.0.3 — PROVA SOCIAL APÓS VENDAS
+
+CAUSA CORRIGIDA
+- A primeira venda era usada para inicializar o contador e era descartada.
+
+CORREÇÕES
+- Leitura inicial e venda real agora são estados separados.
+- A primeira venda 0 -> 1 aciona a prova social.
+- Múltiplas vendas durante o atraso são agrupadas.
+- Mensagem usa o núcleo funcional de comentários do LiveFlow.
+- Se o núcleo não responder, usa o envio antigo como fallback.
+- Todas as mensagens digitadas são salvas em sequência.
+- O botão de teste usa a primeira mensagem e substitui {salesCount}.
+- A fila reinicia ao começar uma nova LIVE.
+
+PRESERVADOS
+- Timer e encerramento.
+- Fixação e bloqueio de cupom.
+- Comentários automáticos.
+- Telegram.
+
+Servidor: 5.0.3
+Extensão: 5.0.3

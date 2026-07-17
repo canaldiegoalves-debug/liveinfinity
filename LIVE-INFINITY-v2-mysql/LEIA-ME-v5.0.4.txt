@@ -1,0 +1,28 @@
+LIVE INFINITY v5.0.4
+
+PAINEL
+- Espectadores e Alertas no mesmo card.
+- Vendas e GMV juntos logo abaixo.
+- Histórico de vendas permanece em seção separada.
+
+COMENTÁRIOS
+- Barra começa imediatamente no clique.
+- Estado da barra fica preservado quando o painel renderiza novamente.
+- Relógio visual próprio atualiza a barra a cada 250 ms.
+
+TELEGRAM
+- Tutorial Como configurar permanece aberto.
+- Estado aberto/fechado não é perdido durante atualizações do painel.
+
+CUPOM
+- Ignorar cupom permanece obrigatório, desabilitado e marcado como TRAVADO.
+- Nenhuma lógica de fixação foi alterada.
+
+PRESERVADOS
+- Timer.
+- Encerramento.
+- Fixação.
+- Prova social.
+
+Servidor: 5.0.4
+Extensão: 5.0.4

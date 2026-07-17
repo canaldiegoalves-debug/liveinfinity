@@ -225,12 +225,19 @@ const OrionContentAutomation = {
       settings.telegramChatId
     ) {
       chrome.runtime.sendMessage({
-        type: "ORION_TELEGRAM_SEND",
-        payload: {
-          text:
-            reason === "timer-zero"
-              ? "⏱️ O timer zerou e a LIVE foi encerrada com confirmação."
-              : "🚨 A LIVE foi encerrada automaticamente após um aviso."
+        type:"ORION_TELEGRAM_EVENT",
+        payload:{
+          kind:"live-end",
+          data:{
+            sales:
+              OrionDetector.state.sales ?? "—",
+            gmv:
+              `R$ ${Number(
+                OrionDetector.state.gmv || 0
+              )
+                .toFixed(2)
+                .replace(".", ",")}`
+          }
         }
       }).catch(() => {});
     }
@@ -321,9 +328,10 @@ const OrionContentAutomation = {
         this.settings.telegramChatId
       ) {
         chrome.runtime.sendMessage({
-          type: "ORION_TELEGRAM_SEND",
-          payload: {
-            text: "🔴 LIVE iniciada."
+          type:"ORION_TELEGRAM_EVENT",
+          payload:{
+            kind:"live-start",
+            data:{}
           }
         }).catch(() => {});
       }
@@ -359,15 +367,30 @@ const OrionContentAutomation = {
   async handleSales() {
     const currentCount=Math.max(0,Math.floor(Number(OrionDetector.state.sales)||0));
 
-    if(this.lastKnownSalesCount===0){
+    if(!this.salesBaselineInitialized){
       this.lastKnownSalesCount=currentCount;
+      this.salesBaselineInitialized=true;
       return;
     }
 
     if(currentCount<=this.lastKnownSalesCount)return;
 
+    const previousCount=
+      this.lastKnownSalesCount;
+
+    const newSalesCount=
+      Math.max(
+        1,
+        currentCount-previousCount
+      );
+
     this.lastKnownSalesCount=currentCount;
     this.pendingSalesCount=currentCount;
+    this.pendingNewSalesCount=
+      Math.max(
+        0,
+        Number(this.pendingNewSalesCount)||0
+      )+newSalesCount;
 
     if (
       this.settings.telegramEnabled &&
@@ -375,14 +398,21 @@ const OrionContentAutomation = {
       this.settings.telegramChatId
     ) {
       chrome.runtime.sendMessage({
-        type: "ORION_TELEGRAM_SEND",
-        payload: {
-          text:
-            `🛒 Nova venda detectada\n` +
-            `Total de vendas na LIVE: ${currentCount}\n` +
-            `GMV atual: R$ ${Number(OrionDetector.state.gmv || 0)
-              .toFixed(2)
-              .replace(".", ",")}`
+        type:"ORION_TELEGRAM_EVENT",
+        payload:{
+          kind:"sale",
+          data:{
+            viewers:
+              OrionDetector.state.viewers ?? "—",
+            sales:currentCount,
+            saleValue:"Venda confirmada",
+            gmv:
+              `R$ ${Number(
+                OrionDetector.state.gmv || 0
+              )
+                .toFixed(2)
+                .replace(".", ",")}`
+          }
         }
       }).catch(() => {});
     }
@@ -415,15 +445,66 @@ const OrionContentAutomation = {
         .replace(/\s{2,}/g," ")
         .trim();
 
-      const result=message
-        ?await OrionDetector.sendChat(message)
-        :{ok:false,error:"Mensagem pós-venda vazia."};
+      let result={
+        ok:false,
+        error:"Mensagem pós-venda vazia."
+      };
+
+      if(message){
+        try{
+          result=await new Promise(resolve=>{
+            chrome.runtime.sendMessage({
+              type:"ORION_SOCIAL_PROOF_SEND",
+              payload:{text:message}
+            },response=>{
+              if(chrome.runtime.lastError){
+                resolve({
+                  ok:false,
+                  error:
+                    chrome.runtime.lastError.message
+                });
+                return;
+              }
+
+              resolve(
+                response||{
+                  ok:false,
+                  error:"Sem resposta do núcleo de comentários."
+                }
+              );
+            });
+          });
+        }catch(error){
+          result={
+            ok:false,
+            error:
+              error?.message||
+              "Falha ao acionar o núcleo de comentários."
+          };
+        }
+
+        if(!result?.ok){
+          result=await OrionDetector.sendChat(message);
+        }
+      }
+
+      const groupedNewSales=
+        Math.max(
+          1,
+          Number(this.pendingNewSalesCount)||1
+        );
+
+      this.pendingNewSalesCount=0;
 
       chrome.runtime.sendMessage({
         type:"ORION_AUTOMATION_EVENT",
         payload:{
           kind:result.ok?"post-sale-social-proof-sent":"post-sale-social-proof-failed",
-          salesCount,message,result,createdAt:new Date().toISOString()
+          salesCount,
+          groupedNewSales,
+          message,
+          result,
+          createdAt:new Date().toISOString()
         }
       }).catch(()=>{});
     },delaySeconds*1000);

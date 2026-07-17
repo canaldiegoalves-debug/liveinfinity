@@ -45,158 +45,414 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 
-function telegramCategoryEnabled(
-  settings,
-  category
-) {
-  if (!settings.telegramEnabled) {
-    return false;
-  }
 
-  if (category === "sale") {
-    return settings.telegramSalesEnabled !== false;
-  }
-
-  if (category === "violation") {
-    return settings.telegramViolationEnabled !== false;
-  }
-
-  if (category === "status") {
-    return settings.telegramStatusEnabled !== false;
-  }
-
-  return true;
+function telegramTime() {
+  return new Date().toLocaleTimeString(
+    "pt-BR"
+  );
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+async function telegramSettings() {
+  const stored =
+    await chrome.storage.local.get([
+      "orionSettings"
+    ]);
+
+  return {
+    ...DEFAULTS,
+    ...(stored.orionSettings || {})
+  };
+}
+
+async function sendTelegramMessage(
+  text,
+  parseMode = null
+) {
+  const settings =
+    await telegramSettings();
+
+  const token =
+    String(
+      settings.telegramToken || ""
+    ).trim();
+
+  const chatId =
+    String(
+      settings.telegramChatId || ""
+    ).trim();
+
   if (
-    message?.type === "ORION_TELEGRAM_SEND" ||
-    message?.type === "ORION_TELEGRAM_NOTIFY"
+    !settings.telegramEnabled ||
+    !token ||
+    !chatId
   ) {
-    (async () => {
-      const stored = await chrome.storage.local.get([
-        "orionSettings"
-      ]);
+    return {
+      ok:false,
+      skipped:true,
+      error:
+        "Telegram ainda não configurado."
+    };
+  }
 
-      const settings =
-        stored.orionSettings || {};
+  const payload = {
+    chat_id:chatId,
+    text:String(text || "")
+  };
 
-      const token = String(
-        message?.payload?.token ||
-        settings.telegramToken ||
-        ""
-      ).trim();
+  if (parseMode) {
+    payload.parse_mode = parseMode;
+  }
 
-      const chatId = String(
-        message?.payload?.chatId ||
-        settings.telegramChatId ||
-        ""
-      ).trim();
+  try {
+    const response = await fetch(
+      "https://api.telegram.org/bot" +
+      token +
+      "/sendMessage",
+      {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json"
+        },
+        body:JSON.stringify(payload)
+      }
+    );
 
-      const text = String(
-        message?.payload?.text || ""
-      ).trim();
+    const body =
+      await response
+        .json()
+        .catch(() => ({}));
 
-      const category = String(
-        message?.payload?.category || ""
-      ).trim();
+    if (
+      !response.ok ||
+      body?.ok === false
+    ) {
+      return {
+        ok:false,
+        status:response.status,
+        error:
+          body?.description ||
+          "Telegram retornou erro."
+      };
+    }
 
-      if (
-        category &&
-        !telegramCategoryEnabled(
-          settings,
-          category
-        )
-      ) {
+    return {
+      ok:true,
+      result:body.result || null
+    };
+  } catch (error) {
+    return {
+      ok:false,
+      error:
+        error?.message ||
+        "Falha de conexão com o Telegram."
+    };
+  }
+}
+
+async function notifyTelegramSale(data = {}) {
+  const settings =
+    await telegramSettings();
+
+  if (
+    settings.telegramSalesEnabled === false
+  ) {
+    return {
+      ok:false,
+      skipped:true
+    };
+  }
+
+  const viewers =
+    data.viewers ?? "—";
+
+  const sales =
+    data.sales ?? "—";
+
+  const saleValue =
+    data.saleValue || "—";
+
+  const gmv =
+    data.gmv || "—";
+
+  const message =
+    "🔴 *NOVA VENDA — " +
+    saleValue +
+    "*\n" +
+    "━━━━━━━━━━━━━━━\n" +
+    "📦 Total de vendas: " +
+    sales +
+    " itens\n" +
+    "💰 GMV total: " +
+    gmv +
+    "\n" +
+    "👀 Ao vivo: " +
+    viewers +
+    " espectadores\n" +
+    "🕐 Horário: " +
+    telegramTime() +
+    "\n" +
+    "━━━━━━━━━━━━━━━\n" +
+    "Live Infinity • TikTok Shop";
+
+  return sendTelegramMessage(
+    message,
+    "Markdown"
+  );
+}
+
+async function notifyTelegramStart() {
+  const settings =
+    await telegramSettings();
+
+  if (
+    settings.telegramStatusEnabled === false
+  ) {
+    return {
+      ok:false,
+      skipped:true
+    };
+  }
+
+  const message =
+    "LIVE INICIADA\n\n" +
+    "Horário: " +
+    telegramTime() +
+    "\n\n" +
+    "Live Infinity - TikTok Shop";
+
+  return sendTelegramMessage(message);
+}
+
+async function notifyTelegramEnd(data = {}) {
+  const settings =
+    await telegramSettings();
+
+  if (
+    settings.telegramStatusEnabled === false
+  ) {
+    return {
+      ok:false,
+      skipped:true
+    };
+  }
+
+  const message =
+    "LIVE ENCERRADA\n\n" +
+    "Total vendas: " +
+    (data.sales ?? "—") +
+    " itens\n" +
+    "GMV: " +
+    (data.gmv || "—") +
+    "\n" +
+    "Horário: " +
+    telegramTime() +
+    "\n\n" +
+    "Live Infinity - TikTok Shop";
+
+  return sendTelegramMessage(message);
+}
+
+async function notifyTelegramViolation(
+  data = {}
+) {
+  const settings =
+    await telegramSettings();
+
+  if (
+    settings.telegramViolationEnabled === false
+  ) {
+    return {
+      ok:false,
+      skipped:true
+    };
+  }
+
+  const detail =
+    String(
+      data.text || ""
+    ).trim();
+
+  const message =
+    "🔴 *VIOLAÇÃO DETECTADA!*\n" +
+    "⚠️ A LIVE pode ser encerrada.\n" +
+    (
+      detail
+        ? "📋 " +
+          detail.slice(0, 350) +
+          "\n"
+        : ""
+    ) +
+    "🕐 " +
+    telegramTime();
+
+  return sendTelegramMessage(
+    message,
+    "Markdown"
+  );
+}
+
+function sendSocialProofToTikTok(
+  text,
+  sendResponse
+) {
+  chrome.tabs.query(
+    {
+      url:"*://*.tiktok.com/*"
+    },
+    tabs => {
+      const target =
+        tabs?.find(tab =>
+          /streamer|console|live/i.test(
+            tab.url || ""
+          )
+        ) || tabs?.[0];
+
+      if (!target?.id) {
         sendResponse({
-          ok: false,
-          skipped: true,
+          ok:false,
           error:
-            "Esta categoria de notificação está desativada."
+            "A aba da LIVE do TikTok não foi encontrada."
         });
         return;
       }
 
-      if (!token || !chatId || !text) {
-        sendResponse({
-          ok: false,
-          error:
-            "Token, Chat ID ou mensagem não configurados."
-        });
-        return;
-      }
-
-      if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
-        sendResponse({
-          ok: false,
-          error: "Token do Bot inválido."
-        });
-        return;
-      }
-
-      try {
-        const response = await fetch(
-          `https://api.telegram.org/bot${token}/sendMessage`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              chat_id: chatId,
-              text
-            })
+      chrome.tabs.sendMessage(
+        target.id,
+        {
+          action:"sendSocialProof",
+          text
+        },
+        response => {
+          if (
+            chrome.runtime.lastError
+          ) {
+            sendResponse({
+              ok:false,
+              error:
+                chrome.runtime.lastError.message
+            });
+            return;
           }
-        );
 
-        const body = await response
-          .json()
-          .catch(() => ({}));
+          sendResponse(
+            response || {
+              ok:false,
+              error:
+                "O núcleo da LIVE não respondeu."
+            }
+          );
+        }
+      );
+    }
+  );
+}
 
-        if (!response.ok || body?.ok === false) {
-          sendResponse({
-            ok: false,
-            status: response.status,
+chrome.runtime.onMessage.addListener(
+  (
+    message,
+    sender,
+    sendResponse
+  ) => {
+    if (
+      message?.type ===
+      "ORION_SOCIAL_PROOF_SEND"
+    ) {
+      const text =
+        String(
+          message?.payload?.text || ""
+        ).trim();
+
+      if (!text) {
+        sendResponse({
+          ok:false,
+          error:
+            "Mensagem de prova social vazia."
+        });
+        return;
+      }
+
+      sendSocialProofToTikTok(
+        text,
+        sendResponse
+      );
+
+      return true;
+    }
+
+    if (
+      message?.type ===
+      "ORION_TELEGRAM_EVENT"
+    ) {
+      (async () => {
+        const kind =
+          String(
+            message?.payload?.kind || ""
+          );
+
+        const data =
+          message?.payload?.data || {};
+
+        let result;
+
+        if (kind === "sale") {
+          result =
+            await notifyTelegramSale(data);
+        } else if (kind === "live-start") {
+          result =
+            await notifyTelegramStart();
+        } else if (kind === "live-end") {
+          result =
+            await notifyTelegramEnd(data);
+        } else if (kind === "violation") {
+          result =
+            await notifyTelegramViolation(
+              data
+            );
+        } else if (kind === "test") {
+          result =
+            await sendTelegramMessage(
+              "✅ Live Infinity conectado com sucesso!\n\n" +
+              "🛒 Vendas: ativas\n" +
+              "🔴 Violações: ativas\n" +
+              "▶ Início/fim da LIVE: ativos"
+            );
+        } else {
+          result = {
+            ok:false,
             error:
-              body?.description ||
-              (
-                response.status === 401
-                  ? "Token do Bot inválido."
-                  : response.status === 400
-                    ? "Chat ID inválido ou o bot ainda não recebeu uma mensagem."
-                    : `Telegram retornou HTTP ${response.status}.`
-              )
-          });
-          return;
+              "Evento Telegram desconhecido."
+          };
         }
 
-        sendResponse({
-          ok: true,
-          result: body.result || null
-        });
-      } catch (error) {
-        sendResponse({
-          ok: false,
-          error:
-            error?.message ||
-            "Falha de conexão com o Telegram."
-        });
-      }
-    })();
+        sendResponse(result);
+      })();
 
-    return true;
-  }
+      return true;
+    }
 
-  if (message?.type === "ORION_NOTIFY") {
-    chrome.notifications.create({
-      type: "basic",
-      iconUrl: "assets/icon128.png",
-      title: message.payload?.title || "Live Infinity",
-      message: message.payload?.message || "Novo evento."
-    }).catch(() => {});
-    sendResponse({ ok: true });
+    if (
+      message?.type ===
+      "ORION_NOTIFY"
+    ) {
+      chrome.notifications
+        .create({
+          type:"basic",
+          iconUrl:"assets/icon128.png",
+          title:
+            message.payload?.title ||
+            "Live Infinity",
+          message:
+            message.payload?.message ||
+            "Novo evento."
+        })
+        .catch(() => {});
+
+      sendResponse({
+        ok:true
+      });
+    }
   }
-});
+);
 
 // ================================================================
 // TIMER LIVEFLOW — ÚNICO DONO DO CRONÔMETRO

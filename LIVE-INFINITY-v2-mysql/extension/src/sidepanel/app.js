@@ -6,7 +6,11 @@ const state={
   settings:{...ORION.DEFAULTS},
   collapse:{},
   live:{dashboardDetected:false,live:false,elapsedSeconds:0,viewers:null,sales:0,gmv:null,product:null,saleEvents:[],chatMessages:[],violation:null,protectionStatus:"idle",lastScanAt:null},
-  commentTimer:null,endAt:null,endTimer:null,timerPaused:false,timerRemainingMs:null,audio:null,audioFiles:[],videoFiles:[],audioIndex:0,ambientContext:null,ambientNodes:[],ambientTimers:[],protectionEvents:[],pendingRender:false,licenseError:"",updateInfo:null,updateChecking:false
+  commentTimer:null,
+  commentProgress:null,
+  commentProgressUiTimer:null,
+  telegramHelpOpen:false,
+  endAt:null,endTimer:null,timerPaused:false,timerRemainingMs:null,audio:null,audioFiles:[],videoFiles:[],audioIndex:0,ambientContext:null,ambientNodes:[],ambientTimers:[],protectionEvents:[],pendingRender:false,licenseError:"",updateInfo:null,updateChecking:false
 };
 
 
@@ -431,6 +435,7 @@ function updateLiveFields(){
 
   setText('[data-live-value="sales"]',state.live.sales);
   setText('[data-live-value="viewers"]',state.live.viewers??"—");
+  setText('[data-live-value="alerts"]',(state.protectionEvents||[]).length);
   setText('[data-live-value="status"]',state.live.live?"ATIVA":"INATIVA");
   setText('[data-live-value="elapsed"]',fmt(state.live.elapsedSeconds));
   setText('[data-live-value="gmv"]',state.live.gmv!==null&&state.live.gmv!==undefined?`R$ ${Number(state.live.gmv).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—");
@@ -515,14 +520,38 @@ function page(){
   if((state.page==="ai"||state.page==="video")&&!pro()){el.innerHTML=`<div class="locked"><h2>🔒 Recurso avançado</h2><p>Disponível nos planos Pro e Premium.</p></div>`;return}
   el.innerHTML=state.page==="home"?home():state.page==="audio"?audio():state.page==="ai"?ai():state.page==="video"?video():settings();
   bind();
+  renderStoredCommentProgress();
+  startCommentProgressUiClock();
 }
 function home(){
   const timerRemaining=state.endAt?Math.max(0,Math.ceil((state.endAt-Date.now())/1000)):0;
   return`
-  <div class="top-summary">
-    <div class="summary"><span>Vendas</span><strong data-live-value="sales">${state.live.sales}</strong></div>
-    <div class="summary"><span>Espectadores</span><strong data-live-value="viewers">${state.live.viewers??"—"}</strong></div>
-    <div class="summary"><span>Alertas</span><strong>0</strong></div>
+  <div class="top-summary top-summary-compact">
+    <div class="summary summary-dual">
+      <div>
+        <span>Espectadores</span>
+        <strong data-live-value="viewers">${state.live.viewers??"—"}</strong>
+      </div>
+
+      <div class="summary-divider"></div>
+
+      <div>
+        <span>Alertas</span>
+        <strong data-live-value="alerts">${(state.protectionEvents||[]).length}</strong>
+      </div>
+    </div>
+  </div>
+
+  <div class="sales-gmv-summary">
+    <div class="summary">
+      <span>Vendas</span>
+      <strong data-live-value="sales">${state.live.sales}</strong>
+    </div>
+
+    <div class="summary">
+      <span>GMV</span>
+      <strong data-live-value="gmv">${state.live.gmv!==null&&state.live.gmv!==undefined?`R$ ${Number(state.live.gmv).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"}</strong>
+    </div>
   </div>
 
   ${section("live","📡","Status da LIVE","detecção em tempo real",`
@@ -595,7 +624,7 @@ function home(){
     <div class="toggle-line"><span>Fixar Produto #1</span><input id="auto-pin" class="toggle" type="checkbox" ${state.settings.autoPinEnabled?"checked":""}></div>
     <div class="toggle-line mandatory-coupon-rule">
       <div>
-        <strong>Ignorar cupons de desconto</strong>
+        <strong>Ignorar cupons de desconto <span class="frozen-feature-badge">TRAVADO</span></strong>
         <p class="helper">Proteção obrigatória: cupons, vouchers, descontos e frete grátis nunca serão fixados.</p>
       </div>
       <input id="skip-coupons" class="toggle" type="checkbox" checked disabled>
@@ -606,8 +635,7 @@ function home(){
     <div class="actions"><button id="pin" class="btn-primary">Fixar produto principal</button><button id="unpin" class="btn-secondary">Desafixar</button></div><p id="pin-msg" class="helper"></p>
   `)}
 
-  ${section("sales","🛒","Contador de Vendas","eventos da sessão atual",`
-    <div class="card-row"><div class="mini-card"><span>Vendas</span><strong data-live-value="sales">${state.live.sales}</strong></div><div class="mini-card"><span>GMV</span><strong data-live-value="gmv">${state.live.gmv!==null&&state.live.gmv!==undefined?`R$ ${Number(state.live.gmv).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"}</strong></div></div>
+  ${section("sales","🛒","Histórico de Vendas","eventos da sessão atual",`
     <div class="event-list">${(state.live.saleEvents||[]).slice(-8).reverse().map(e=>`<p>🛒 ${esc(e.text)}</p>`).join("")||"<p>Nenhuma venda detectada.</p>"}</div>
   `)}
 
@@ -775,7 +803,7 @@ function home(){
         💾 Salvar configuração
       </button>
 
-      <details class="telegram-liveflow-help">
+      <details id="telegram-liveflow-help" class="telegram-liveflow-help" ${state.telegramHelpOpen?"open":""}>
         <summary>📖 Como configurar notificações?</summary>
         <div>
           <strong>Passo 1 — Criar seu Bot</strong>
@@ -1107,7 +1135,25 @@ function bind(){
 
   document.getElementById("save-post")?.addEventListener("click",async()=>{
     state.settings.postSaleEnabled=document.getElementById("post-enabled").checked;
-    state.settings.postSaleMessage=document.getElementById("post-message").value.trim();
+
+    state.settings.postSaleMessages=
+      document.getElementById("post-message").value
+        .split("\n")
+        .map(value=>value.trim())
+        .filter(Boolean);
+
+    state.settings.postSaleMessage=
+      state.settings.postSaleMessages[0]||
+      "Parabéns pela compra! {salesCount} pessoas já finalizaram a compra nessa live.";
+
+    state.settings.postSaleDelaySeconds=
+      Math.max(
+        5,
+        Number(
+          document.getElementById("post-delay")?.value
+        )||10
+      );
+
     await saveSettings();
 
     const status=document.getElementById("post-status");
@@ -1119,8 +1165,23 @@ function bind(){
   });
 
   document.getElementById("test-post")?.addEventListener("click",async()=>{
-    const message=document.getElementById("post-message").value.replace(/\{nome\}/gi,"Cliente");
-    const result=await post("ORION_SEND_CHAT",{text:message});
+    const message=
+      document.getElementById("post-message").value
+        .split("\n")
+        .map(value=>value.trim())
+        .filter(Boolean)[0]
+        ?.replace(/\{nome\}/gi,"Cliente")
+        .replace(/\{salesCount\}/gi,"1")
+        .replace(/\{vendas\}/gi,"1")||"";
+
+    const result=await chrome.runtime.sendMessage({
+      type:"ORION_SOCIAL_PROOF_SEND",
+      payload:{text:message}
+    }).catch(error=>({
+      ok:false,
+      error:error?.message||
+        "Falha ao testar a prova social."
+    }));
     const status=document.getElementById("post-status");
 
     if(status){
@@ -1238,11 +1299,15 @@ function bind(){
       intervalMax:state.settings.maxCommentDelay
     });
 
+    const progressStartedAt=Date.now();
+
     updateCommentProgress({
       kind:"comment-progress",
       progress:0,
       remainingSeconds:immediateDelay,
       delaySeconds:immediateDelay,
+      startedAt:progressStartedAt,
+      endsAt:progressStartedAt+immediateDelay*1000,
       currentIndex:0,
       totalComments:comments.length,
       nextComment:comments[0]
@@ -1258,6 +1323,10 @@ function bind(){
   });
 
   document.getElementById("comments-stop")?.addEventListener("click",async()=>{clearTimeout(state.commentTimer);state.commentTimer=null;state.settings.commentsEnabled=false;await saveSettings();const event=document.getElementById("comments-status");if(event)event.textContent="Comentários automáticos parados."});
+
+  document.getElementById("telegram-liveflow-help")?.addEventListener("toggle",event=>{
+    state.telegramHelpOpen=event.currentTarget.open;
+  });
 
   document.getElementById("save-telegram")?.addEventListener("click",async()=>{
     const token=document.getElementById("telegram-token")?.value.trim()||"";
@@ -1350,12 +1419,10 @@ function bind(){
     }
 
     const result=await chrome.runtime.sendMessage({
-      type:"ORION_TELEGRAM_SEND",
+      type:"ORION_TELEGRAM_EVENT",
       payload:{
-        token,
-        chatId,
-        text:
-          "✅ Live Infinity conectado com sucesso!\n\n🛒 Vendas: ativas\n🔴 Violações: ativas\n▶ Início/fim da LIVE: ativos"
+        kind:"test",
+        data:{}
       }
     }).catch(error=>({
       ok:false,
@@ -1449,7 +1516,11 @@ function startTicker(){
   state.endTimer=setInterval(update,1000);
 }
 
-function updateCommentProgress(payload){
+
+function renderStoredCommentProgress(){
+  const payload=state.commentProgress;
+  if(!payload)return;
+
   const card=document.getElementById("comment-progress-card");
   const bar=document.getElementById("comment-progress-bar");
   const time=document.getElementById("comment-progress-time");
@@ -1459,98 +1530,101 @@ function updateCommentProgress(payload){
 
   if(!card)return;
 
+  let progress=Number(payload.progress)||0;
+  let remainingSeconds=Number(payload.remainingSeconds)||0;
+
+  if(payload.endsAt&&payload.startedAt){
+    const now=Date.now();
+    const total=Math.max(1,payload.endsAt-payload.startedAt);
+    const remaining=Math.max(0,payload.endsAt-now);
+    progress=Math.max(0,Math.min(100,Math.round(((total-remaining)/total)*100)));
+    remainingSeconds=Math.ceil(remaining/1000);
+  }
+
+  card.classList.toggle("active",payload.kind!=="comment-stopped");
+  card.classList.toggle("inactive",payload.kind==="comment-stopped");
+
+  if(bar)bar.style.width=`${progress}%`;
+  if(percent)percent.textContent=`${progress}%`;
+
+  if(time){
+    time.textContent=
+      payload.kind==="comment-stopped"
+        ?"Comentários parados"
+        :payload.kind==="comment-failed"
+          ?"Tentando novamente"
+          :`${Math.max(0,remainingSeconds)}s`;
+  }
+
+  if(position){
+    position.textContent=
+      payload.totalComments
+        ?`Comentário ${(Number(payload.currentIndex)||0)+1} de ${payload.totalComments}`
+        :"Sequência pronta";
+  }
+
+  if(next){
+    next.textContent=
+      payload.nextComment
+        ?`Próximo: ${payload.nextComment}`
+        :payload.message||
+          "Preparando próximo comentário...";
+  }
+}
+
+function startCommentProgressUiClock(){
+  clearInterval(state.commentProgressUiTimer);
+
+  state.commentProgressUiTimer=setInterval(()=>{
+    if(!state.commentProgress)return;
+    renderStoredCommentProgress();
+  },250);
+}
+
+function updateCommentProgress(payload){
+  const normalized={...payload};
+
   if(payload.kind==="comment-progress"){
-    const value=Math.max(0,Math.min(100,Number(payload.progress)||0));
+    const delaySeconds=Math.max(
+      1,
+      Number(payload.delaySeconds||payload.remainingSeconds||1)
+    );
 
-    card.classList.add("active");
-    card.classList.remove("inactive");
+    normalized.startedAt=
+      payload.startedAt||
+      Date.now();
 
-    if(bar)bar.style.width=`${value}%`;
-    if(percent)percent.textContent=`${value}%`;
-
-    if(time){
-      time.textContent=
-        `${Math.max(0,Number(payload.remainingSeconds)||0)}s`;
-    }
-
-    if(position){
-      position.textContent=
-        `Comentário ${(Number(payload.currentIndex)||0)+1} de ${Number(payload.totalComments)||0}`;
-    }
-
-    if(next){
-      next.textContent=
-        payload.nextComment
-          ?`Próximo: ${payload.nextComment}`
-          :"Preparando próximo comentário...";
-    }
-
-    return;
-  }
-
-  if(payload.kind==="comment-sent"){
-    if(bar)bar.style.width="100%";
-    if(percent)percent.textContent="100%";
-    if(time)time.textContent="Enviado";
-
-    if(position){
-      position.textContent=
-        `Comentário ${payload.currentPosition||1} de ${payload.totalComments||0} enviado`;
-    }
-
-    if(next){
-      next.textContent=
-        payload.message||"Comentário enviado.";
-    }
-
-    return;
-  }
-
-  if(payload.kind==="comment-failed"){
-    card.classList.add("active");
-    card.classList.remove("inactive");
-
-    if(time)time.textContent="Tentando novamente";
-
-    if(next){
-      next.textContent=
-        payload.result?.error||
-        "Campo indisponível. Nova tentativa em 3 segundos.";
-    }
-
-    return;
-  }
-
-  if(payload.kind==="comment-stopped"){
-    card.classList.remove("active");
-    card.classList.add("inactive");
-
-    if(bar)bar.style.width="0%";
-    if(percent)percent.textContent="0%";
-    if(time)time.textContent="Comentários parados";
-
-    if(next){
-      next.textContent=
-        "Clique em Iniciar comentários para retomar.";
-    }
-
-    return;
+    normalized.endsAt=
+      payload.endsAt||
+      (
+        normalized.startedAt+
+        delaySeconds*1000
+      );
   }
 
   if(payload.kind==="comment-started"){
-    card.classList.add("active");
-    card.classList.remove("inactive");
-
-    if(position){
-      position.textContent=
-        `Sequência com ${payload.totalComments||0} comentário(s)`;
-    }
-
-    if(next){
-      next.textContent=
-        `Intervalo configurado: ${payload.intervalMin||0}s a ${payload.intervalMax||0}s`;
-    }
+    normalized.progress=0;
+    normalized.remainingSeconds=
+      Number(payload.intervalMin)||0;
   }
+
+  if(payload.kind==="comment-sent"){
+    normalized.progress=100;
+    normalized.remainingSeconds=0;
+  }
+
+  if(payload.kind==="comment-stopped"){
+    normalized.progress=0;
+    normalized.remainingSeconds=0;
+  }
+
+  state.commentProgress={
+    ...(state.commentProgress||{}),
+    ...normalized
+  };
+
+  renderStoredCommentProgress();
+  startCommentProgressUiClock();
 }
 
 chrome.runtime.onMessage.addListener((message)=>{

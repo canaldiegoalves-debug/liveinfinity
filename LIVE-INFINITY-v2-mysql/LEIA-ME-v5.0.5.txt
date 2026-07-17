@@ -1,0 +1,29 @@
+LIVE INFINITY v5.0.5 — TELEGRAM LIVEFLOW
+
+A comunicação com o Telegram foi refeita usando o mesmo modelo funcional
+do LiveFlow:
+
+- O background é o único responsável por enviar mensagens.
+- Token e Chat ID são lidos diretamente do storage da extensão.
+- Cada evento possui uma função própria:
+  venda, início, encerramento e violação.
+- O botão de teste usa exatamente o mesmo caminho das notificações reais.
+- A API do Telegram é chamada diretamente pelo service worker.
+- Incluída permissão https://api.telegram.org/* no manifest.
+
+FORMATOS
+- Venda: total, GMV, espectadores e horário.
+- Início: horário da abertura da live.
+- Encerramento: vendas, GMV e horário.
+- Violação: aviso e texto detectado.
+
+NÃO ALTERADO
+- Ignorar cupom permanece travado e funcional.
+- Timer e encerramento.
+- Fixação.
+- Comentários.
+- Prova social.
+- Layout v5.0.4.
+
+Servidor: 5.0.5
+Extensão: 5.0.5
