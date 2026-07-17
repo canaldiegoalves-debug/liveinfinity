@@ -680,6 +680,47 @@ function home(){
           ? `${state.settings.comments.length} comentário(s) salvo(s).`
           : "Nenhum comentário salvo."}
     </p>
+
+    <div
+      id="comment-progress-card"
+      class="comment-progress-card ${state.settings.commentsEnabled?"active":"inactive"}"
+    >
+      <div class="comment-progress-header">
+        <strong>Próximo comentário</strong>
+        <span id="comment-progress-time">
+          ${state.settings.commentsEnabled
+            ?"Aguardando cronômetro..."
+            :"Comentários parados"}
+        </span>
+      </div>
+
+      <div class="comment-progress-track">
+        <div
+          id="comment-progress-bar"
+          class="comment-progress-bar"
+          style="width:0%"
+        ></div>
+      </div>
+
+      <div class="comment-progress-footer">
+        <span id="comment-progress-position">
+          ${(state.settings.comments||[]).length
+            ?"Sequência pronta"
+            :"Nenhum comentário na lista"}
+        </span>
+
+        <span id="comment-progress-percent">
+          0%
+        </span>
+      </div>
+
+      <p
+        id="comment-progress-next"
+        class="comment-progress-next"
+      >
+        A barra será iniciada quando os comentários estiverem ativos.
+      </p>
+    </div>
   `,false)}
 
   ${section("telegram","✈️","Notificações Telegram","receba alertas diretamente no celular",`
@@ -1231,7 +1272,6 @@ function bind(){
     render();
   });
 }
-function scheduleComment(){clearTimeout(state.commentTimer);if(!state.settings.commentsEnabled||!state.settings.comments.length)return;const min=Math.max(5,state.settings.minCommentDelay),max=Math.max(min,state.settings.maxCommentDelay),delay=(Math.floor(Math.random()*(max-min+1))+min)*1000;state.commentTimer=setTimeout(()=>{post("ORION_SEND_CHAT",{text:state.settings.comments[Math.floor(Math.random()*state.settings.comments.length)]});scheduleComment()},delay)}
 function startTicker(){
   clearInterval(state.endTimer);
 
@@ -1265,9 +1305,116 @@ function startTicker(){
   update();
   state.endTimer=setInterval(update,1000);
 }
+
+function updateCommentProgress(payload){
+  const card=document.getElementById("comment-progress-card");
+  const bar=document.getElementById("comment-progress-bar");
+  const time=document.getElementById("comment-progress-time");
+  const percent=document.getElementById("comment-progress-percent");
+  const position=document.getElementById("comment-progress-position");
+  const next=document.getElementById("comment-progress-next");
+
+  if(!card)return;
+
+  if(payload.kind==="comment-progress"){
+    const value=Math.max(0,Math.min(100,Number(payload.progress)||0));
+
+    card.classList.add("active");
+    card.classList.remove("inactive");
+
+    if(bar)bar.style.width=`${value}%`;
+    if(percent)percent.textContent=`${value}%`;
+
+    if(time){
+      time.textContent=
+        `${Math.max(0,Number(payload.remainingSeconds)||0)}s`;
+    }
+
+    if(position){
+      position.textContent=
+        `Comentário ${(Number(payload.currentIndex)||0)+1} de ${Number(payload.totalComments)||0}`;
+    }
+
+    if(next){
+      next.textContent=
+        payload.nextComment
+          ?`Próximo: ${payload.nextComment}`
+          :"Preparando próximo comentário...";
+    }
+
+    return;
+  }
+
+  if(payload.kind==="comment-sent"){
+    if(bar)bar.style.width="100%";
+    if(percent)percent.textContent="100%";
+    if(time)time.textContent="Enviado";
+
+    if(position){
+      position.textContent=
+        `Comentário ${payload.currentPosition||1} de ${payload.totalComments||0} enviado`;
+    }
+
+    if(next){
+      next.textContent=
+        payload.message||"Comentário enviado.";
+    }
+
+    return;
+  }
+
+  if(payload.kind==="comment-failed"){
+    card.classList.add("active");
+    card.classList.remove("inactive");
+
+    if(time)time.textContent="Tentando novamente";
+
+    if(next){
+      next.textContent=
+        payload.result?.error||
+        "Campo indisponível. Nova tentativa em 3 segundos.";
+    }
+
+    return;
+  }
+
+  if(payload.kind==="comment-stopped"){
+    card.classList.remove("active");
+    card.classList.add("inactive");
+
+    if(bar)bar.style.width="0%";
+    if(percent)percent.textContent="0%";
+    if(time)time.textContent="Comentários parados";
+
+    if(next){
+      next.textContent=
+        "Clique em Iniciar comentários para retomar.";
+    }
+
+    return;
+  }
+
+  if(payload.kind==="comment-started"){
+    card.classList.add("active");
+    card.classList.remove("inactive");
+
+    if(position){
+      position.textContent=
+        `Sequência com ${payload.totalComments||0} comentário(s)`;
+    }
+
+    if(next){
+      next.textContent=
+        `Intervalo configurado: ${payload.intervalMin||0}s a ${payload.intervalMax||0}s`;
+    }
+  }
+}
+
 chrome.runtime.onMessage.addListener((message)=>{
   if(message?.type==="ORION_AUTOMATION_EVENT"){
     const payload=message.payload||{};
+
+    updateCommentProgress(payload);
     const time=new Date(payload.createdAt||Date.now()).toLocaleTimeString("pt-BR");
 
     let description="Evento de automação.";

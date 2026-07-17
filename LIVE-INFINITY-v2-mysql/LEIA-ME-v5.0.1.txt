@@ -1,0 +1,21 @@
+LIVE INFINITY v5.0.1 — COMENTÁRIOS SEQUENCIAIS
+
+ALTERADO SOMENTE O MÓDULO DE COMENTÁRIOS.
+
+- Ordem fixa da lista.
+- Só avança após envio bem-sucedido.
+- Intervalo sorteado entre mínimo e máximo.
+- Primeiro comentário também respeita o intervalo.
+- Falha repete o mesmo comentário após 3 segundos.
+- Alterações em outros módulos não reiniciam a fila.
+- Barra de progresso em tempo real.
+- Exibe segundos restantes, porcentagem e próximo comentário.
+
+PRESERVADOS:
+- Timer no background.
+- Encerramento da LIVE.
+- Confirmação.
+- Auto-fix.
+
+Servidor: 5.0.1
+Extensão: 5.0.1
