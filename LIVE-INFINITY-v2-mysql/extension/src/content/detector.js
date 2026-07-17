@@ -20,9 +20,6 @@ window.OrionDetector = {
   lastViolationHash: "",
   lastProtectionAt: 0,
   emergencyEndBusy: false,
-  timerArmedThisPage: false,
-  pageLoadedAt: Date.now(),
-  freshWarningAuthorizedAt: 0,
   emergencyWarningHash: "",
   uniqueSaleIds: new Set(),
   liveStartedAt: 0,
@@ -169,16 +166,10 @@ window.OrionDetector = {
           return;
         }
 
-        // Autoriza apenas este aviso novo por 10 segundos.
-        this.freshWarningAuthorizedAt = Date.now();
-
-        window.dispatchEvent(
-          new CustomEvent(
-            "LIVE_INFINITY_CRITICAL_WARNING",
-            { detail: { text } }
-          )
-        );
-        return { ok: true, delegated: true };
+        return this.endLiveImmediately({
+          reason: "warning",
+          warningText: text
+        });
       }).catch(console.error);
 
       return;
@@ -987,25 +978,119 @@ window.OrionDetector = {
     dryRun = false,
     reason = "manual"
   } = {}) {
+    const stored = await chrome.storage.local.get([
+      ORION.STORAGE.SETTINGS
+    ]);
+
+    const settings = {
+      ...ORION.DEFAULTS,
+      ...(stored[ORION.STORAGE.SETTINGS] || {})
+    };
+
+    const now = Date.now();
+    const endTimerAt = Number(
+      settings.endTimerAt || 0
+    );
+
+    const timerAuthorized =
+      reason === "timer-zero" &&
+      endTimerAt > 0 &&
+      !settings.endTimerPaused &&
+      now >= endTimerAt;
+
+    const warningAuthorized =
+      reason === "warning" &&
+      Boolean(settings.protectionEnabled);
+
+    // Trava final: nenhuma chamada escondida consegue clicar
+    // no botão fora das duas regras autorizadas.
+    if (
+      !dryRun &&
+      !timerAuthorized &&
+      !warningAuthorized
+    ) {
+      return {
+        ok: false,
+        blocked: true,
+        retryable: false,
+        reason,
+        stage: "authorization-blocked",
+        error:
+          "Encerramento bloqueado: timer não zerou e não há aviso crítico autorizado."
+      };
+    }
+
+    const initialDeadline = Date.now() + 5000;
+    let initial = null;
+
+    while (Date.now() < initialDeadline) {
+      initial = this.findEndLiveButton();
+
+      if (initial) break;
+
+      await this.wait(100);
+    }
+
+    if (!initial) {
+      return {
+        ok: false,
+        retryable: true,
+        reason,
+        stage: "initial-button-not-found",
+        error:
+          "Botão de energia da LIVE não localizado."
+      };
+    }
+
     if (dryRun) {
       return {
         ok: true,
         dryRun: true,
-        delegated: true
+        reason,
+        stage: "initial-button-found",
+        method: initial.method,
+        buttonText: initial.text
       };
     }
 
-    window.dispatchEvent(
-      new CustomEvent(
-        "LIVE_INFINITY_END_REQUEST",
-        { detail: { reason } }
-      )
-    );
+    initial.element.click();
+
+    const confirmationDeadline =
+      Date.now() + 10000;
+
+    while (Date.now() < confirmationDeadline) {
+      const confirmation =
+        this.findConfirmEndButton();
+
+      if (confirmation) {
+        confirmation.element.click();
+
+        await this.wait(500);
+
+        // A confirmação foi localizada e clicada.
+        return {
+          ok: true,
+          reason,
+          stage: "confirmed",
+          initialMethod: initial.method,
+          initialButton: initial.text,
+          confirmationButton: confirmation.text,
+          completedAt: new Date().toISOString()
+        };
+      }
+
+      await this.wait(150);
+    }
 
     return {
-      ok: true,
-      delegated: true,
-      reason
+      ok: false,
+      retryable: true,
+      reason,
+      stage: "confirmation-not-found",
+      initialMethod: initial.method,
+      initialButton: initial.text,
+      error:
+        "O botão de confirmação não apareceu."
     };
   },
 
@@ -1243,38 +1328,61 @@ window.OrionDetector = {
   },
 
   async sendChat(text) {
+    const message = String(text || "").trim();
+
+    if (!message) {
+      return {
+        ok: false,
+        retryable: false,
+        error: "Mensagem vazia."
+      };
+    }
+
+    const textarea =
+      document.querySelector('textarea[placeholder*="algo" i]') ||
+      document.querySelector('textarea[placeholder*="coment" i]') ||
+      document.querySelector('textarea[placeholder*="comment" i]') ||
+      document.querySelector('textarea[placeholder*="digite" i]') ||
+      document.querySelector('.chat-input textarea') ||
+      document.querySelector('[class*="chat" i] textarea') ||
+      document.querySelector('[class*="input" i] textarea') ||
+      document.querySelector('textarea.arco-textarea') ||
+      [...document.querySelectorAll("textarea")]
+        .find(element => this.isVisible(element));
+
+    if (!textarea || !this.isVisible(textarea)) {
+      return {
+        ok: false,
+        retryable: true,
+        error: "Campo de comentário não encontrado."
+      };
+    }
+
     try {
-      // Fluxo do LiveFlow: múltiplos seletores do campo do TikTok Shop.
-      const textarea =
-        document.querySelector('textarea[placeholder*="algo"]') ||
-        document.querySelector('textarea[placeholder*="comment"]') ||
-        document.querySelector('textarea[placeholder*="Comment"]') ||
-        document.querySelector('textarea[placeholder*="Digite"]') ||
-        document.querySelector('.chat-input textarea') ||
-        document.querySelector('[class*="chat"] textarea') ||
-        document.querySelector('[class*="input"] textarea') ||
-        document.querySelector('textarea.arco-textarea') ||
-        document.querySelector('textarea');
-
-      if (!textarea) {
-        return {
-          ok: false,
-          retryable: true,
-          error: "Campo de comentário não encontrado."
-        };
-      }
-
       textarea.focus();
       textarea.click();
 
-      // NativeSetter — força o React a reconhecer a mudança.
       const nativeSetter =
         Object.getOwnPropertyDescriptor(
           window.HTMLTextAreaElement.prototype,
           "value"
-        ).set;
+        )?.set;
 
-      nativeSetter.call(textarea, text);
+      if (!nativeSetter) {
+        return {
+          ok: false,
+          retryable: true,
+          error: "Setter nativo do campo não encontrado."
+        };
+      }
+
+      // Limpa primeiro para forçar o React a reconhecer uma nova entrada.
+      nativeSetter.call(textarea, "");
+      textarea.dispatchEvent(
+        new Event("input", { bubbles: true })
+      );
+
+      nativeSetter.call(textarea, message);
 
       textarea.dispatchEvent(
         new Event("input", { bubbles: true })
@@ -1284,61 +1392,65 @@ window.OrionDetector = {
         new Event("change", { bubbles: true })
       );
 
-      textarea.dispatchEvent(
-        new CompositionEvent(
-          "compositionstart",
-          { bubbles: true }
-        )
-      );
-
-      textarea.dispatchEvent(
-        new CompositionEvent(
-          "compositionend",
-          {
-            data: text,
-            bubbles: true
-          }
-        )
-      );
-
-      // LiveFlow aguarda o React e dispara Enter.
-      setTimeout(() => {
+      try {
         textarea.dispatchEvent(
-          new KeyboardEvent("keydown", {
-            key: "Enter",
-            keyCode: 13,
-            bubbles: true,
-            cancelable: true
-          })
-        );
-
-        textarea.dispatchEvent(
-          new KeyboardEvent("keypress", {
-            key: "Enter",
-            keyCode: 13,
-            bubbles: true,
-            cancelable: true
-          })
-        );
-
-        textarea.dispatchEvent(
-          new KeyboardEvent("keyup", {
-            key: "Enter",
-            keyCode: 13,
+          new CompositionEvent("compositionstart", {
             bubbles: true
           })
         );
-      }, 300);
+
+        textarea.dispatchEvent(
+          new CompositionEvent("compositionupdate", {
+            data: message,
+            bubbles: true
+          })
+        );
+
+        textarea.dispatchEvent(
+          new CompositionEvent("compositionend", {
+            data: message,
+            bubbles: true
+          })
+        );
+      } catch {}
+
+      await this.wait(300);
+
+      const enterOptions = {
+        key: "Enter",
+        code: "Enter",
+        keyCode: 13,
+        which: 13,
+        charCode: 13,
+        bubbles: true,
+        cancelable: true
+      };
+
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", enterOptions)
+      );
+
+      textarea.dispatchEvent(
+        new KeyboardEvent("keypress", enterOptions)
+      );
+
+      textarea.dispatchEvent(
+        new KeyboardEvent("keyup", enterOptions)
+      );
+
+      await this.wait(350);
 
       return {
         ok: true,
-        message: "Comentário enviado: " + text
+        message
       };
     } catch (error) {
       return {
         ok: false,
         retryable: true,
-        error: "Erro: " + error.message
+        error:
+          error?.message ||
+          "Erro inesperado ao enviar comentário."
       };
     }
   },

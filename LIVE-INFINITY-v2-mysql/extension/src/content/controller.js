@@ -43,46 +43,12 @@ const OrionContentAutomation = {
   },
 
   async loadSettings() {
-    const data = await chrome.storage.local.get([
-      ORION.STORAGE.SETTINGS
-    ]);
-
+    const data = await chrome.storage.local.get([ORION.STORAGE.SETTINGS]);
     this.settings = {
       ...ORION.DEFAULTS,
       ...(data[ORION.STORAGE.SETTINGS] || {})
     };
-
-    const endTimerAt = Number(
-      this.settings.endTimerAt || 0
-    );
-
-    // Ao atualizar a página:
-    // timer já vencido é apagado e nunca encerra a LIVE.
-    if (
-      endTimerAt &&
-      endTimerAt <= Date.now()
-    ) {
-      this.settings.endTimerAt = null;
-      this.settings.endTimerPaused = false;
-      this.settings.endTimerRemainingMs = null;
-      this.settings.endTimerStartedAt = null;
-
-      OrionDetector.timerArmedThisPage = false;
-
-      await chrome.storage.local.set({
-        [ORION.STORAGE.SETTINGS]: this.settings
-      });
-    } else {
-      // Um timer futuro pode continuar após o refresh,
-      // mas nunca dispara durante a inicialização da página.
-      OrionDetector.timerArmedThisPage =
-        endTimerAt > Date.now();
-
-      OrionDetector.pageLoadedAt = Date.now();
-      OrionDetector.freshWarningAuthorizedAt = 0;
-    }
   },
-
 
   applySettings() {
     this.configureComments();
@@ -94,80 +60,162 @@ const OrionContentAutomation = {
     this.commentTimer = null;
 
     if (!this.settings.commentsEnabled) return;
+    if (!Array.isArray(this.settings.comments) || !this.settings.comments.length) return;
 
-    const messages = Array.isArray(
-      this.settings.comments
-    )
+    // Mantém a posição atual enquanto a extensão estiver aberta.
+    // Em uma nova sessão, começa pelo primeiro item salvo.
+    if (
+      !Number.isInteger(this.commentIndex) ||
+      this.commentIndex < 0 ||
+      this.commentIndex >= this.settings.comments.length
+    ) {
+      this.commentIndex = 0;
+    }
+
+    this.scheduleNextComment();
+  },
+
+  scheduleNextComment() {
+    clearTimeout(this.commentTimer);
+    this.commentTimer = null;
+
+    if (!this.settings.commentsEnabled) return;
+
+    const comments = Array.isArray(this.settings.comments)
       ? this.settings.comments
           .map(value => String(value || "").trim())
           .filter(Boolean)
       : [];
 
-    if (!messages.length) return;
+    if (!comments.length) return;
 
-    this.settings.comments = messages;
-    this.commentIndex = 0;
-
-    // Comportamento exato do LiveFlow:
-    // envia o primeiro e depois agenda os próximos.
-    OrionDetector.sendChat(messages[0]);
-    this.commentIndex = 1;
-
-    this.scheduleNextComment();
-  },
-
-
-  scheduleNextComment() {
-    if (
-      !this.settings.commentsEnabled ||
-      !this.settings.comments ||
-      !this.settings.comments.length
-    ) {
-      return;
-    }
-
-    const intervalMin = Number(
-      this.settings.minCommentDelay || 45
+    const configuredMinimum = Math.floor(
+      Number(this.settings.minCommentDelay)
     );
 
-    const intervalMax = Number(
-      this.settings.maxCommentDelay || 90
+    const configuredMaximum = Math.floor(
+      Number(this.settings.maxCommentDelay)
     );
 
-    const delay =
-      Math.floor(
-        Math.random() *
-        (intervalMax - intervalMin + 1)
-      ) +
-      intervalMin;
+    const minimum =
+      Number.isFinite(configuredMinimum) &&
+      configuredMinimum >= 1
+        ? configuredMinimum
+        : 45;
 
-    this.commentTimer = setTimeout(() => {
-      const list = this.settings.comments;
+    const maximum =
+      Number.isFinite(configuredMaximum) &&
+      configuredMaximum >= 1
+        ? configuredMaximum
+        : 90;
 
-      OrionDetector.sendChat(
-        list[this.commentIndex % list.length]
-      );
+    const lower = Math.min(minimum, maximum);
+    const upper = Math.max(minimum, maximum);
 
-      this.commentIndex += 1;
+    const seconds =
+      Math.floor(Math.random() * (upper - lower + 1)) +
+      lower;
 
+    this.commentTimer = setTimeout(async () => {
+      if (!this.settings.commentsEnabled) return;
+
+      const selectedIndex =
+        this.commentIndex % comments.length;
+
+      const message = comments[selectedIndex];
+
+      let result = await OrionDetector.sendChat(message);
+
+      if (!result.ok && result.retryable) {
+        await OrionDetector.wait(1000);
+        result = await OrionDetector.sendChat(message);
+      }
+
+      if (result.ok) {
+        this.commentIndex =
+          (this.commentIndex + 1) % comments.length;
+      }
+
+      chrome.runtime.sendMessage({
+        type: "ORION_AUTOMATION_EVENT",
+        payload: {
+          kind: result.ok
+            ? "comment-sent"
+            : "comment-failed",
+          selectedIndex,
+          message,
+          result,
+          createdAt: new Date().toISOString()
+        }
+      }).catch(() => {});
+
+      // Agenda somente depois de terminar o envio atual.
       this.scheduleNextComment();
-    }, delay * 1000);
+    }, seconds * 1000);
   },
 
 
   configureAutoPin() {
-    // Gerenciado exclusivamente por liveflow-core.js
+    clearInterval(this.autoPinTimer);
+
+    this.autoPinTimer = null;
+    this.autoPinBusy = false;
+
+    if (!this.settings.autoPinEnabled) return;
+
+    // Faz um ciclo logo ao ativar.
+    this.refreshProductCycle("startup");
+
+    // Repete apenas a cada 20 segundos.
+    // Não monitora overlay para não ficar clicando continuamente.
+    this.autoPinTimer = setInterval(() => {
+      this.refreshProductCycle("scheduled-20s");
+    }, 20000);
   },
 
-  runLiveFlowAutoFix() {
-    // Gerenciado exclusivamente por liveflow-core.js
-  },
+  async refreshProductCycle(reason = "manual") {
+    if (this.autoPinBusy) return {
+      ok: false,
+      skipped: true,
+      error: "O ciclo anterior ainda está em execução."
+    };
 
-  async refreshProductCycle() {
-    window.dispatchEvent(
-      new CustomEvent("LIVE_INFINITY_MANUAL_PIN")
-    );
-    return { ok: true, mode: "liveflow-core" };
+    this.autoPinBusy = true;
+
+    try {
+      const result = await OrionDetector.refreshPinnedProduct(
+        this.settings.skipCoupons !== false
+      );
+
+      chrome.runtime.sendMessage({
+        type: "ORION_AUTOMATION_EVENT",
+        payload: {
+          kind: result.ok ? "product-refreshed" : "product-refresh-failed",
+          result,
+          createdAt: new Date().toISOString()
+        }
+      }).catch(() => {});
+
+      return result;
+    } catch (error) {
+      const result = {
+        ok: false,
+        error: error?.message || "Erro inesperado no ciclo de fixação."
+      };
+
+      chrome.runtime.sendMessage({
+        type: "ORION_AUTOMATION_EVENT",
+        payload: {
+          kind: "product-refresh-failed",
+          result,
+          createdAt: new Date().toISOString()
+        }
+      }).catch(() => {});
+
+      return result;
+    } finally {
+      this.autoPinBusy = false;
+    }
   },
 
   async pinProduct() {
@@ -175,12 +223,86 @@ const OrionContentAutomation = {
   },
 
 
+
   configureExactEndTimer() {
-    // Timer gerenciado exclusivamente por liveflow-core.js
+    clearTimeout(this.exactEndTimer);
+    this.exactEndTimer = null;
+
+    if (this.settings.endTimerPaused) return;
+
+    const endTimerAt = Number(this.settings.endTimerAt || 0);
+    if (!endTimerAt) return;
+
+    const delay = Math.max(0, endTimerAt - Date.now());
+
+    this.exactEndTimer = setTimeout(() => {
+      this.handleEndTimer({
+        force: true,
+        reason: "timer-zero"
+      }).catch(console.error);
+    }, delay);
   },
 
   startEmergencyEndLoop(reason = "timer-zero") {
-    // Encerramento gerenciado exclusivamente por liveflow-core.js
+    clearTimeout(this.endLiveEmergencyTimer);
+    this.endLiveEmergencyTimer = null;
+
+    let attempts = 0;
+    const maxAttempts = 30;
+
+    const attemptEnd = async () => {
+      attempts += 1;
+
+      const result = await OrionDetector.endLive({
+        dryRun: false,
+        reason
+      });
+
+      chrome.runtime.sendMessage({
+        type: "ORION_AUTOMATION_EVENT",
+        payload: {
+          kind: result.ok
+            ? "live-end-confirmed"
+            : "live-end-retry",
+          reason,
+          attempts,
+          result,
+          createdAt: new Date().toISOString()
+        }
+      }).catch(() => {});
+
+      if (result.ok) {
+        await this.finishEndTimerSuccess(
+          reason,
+          result
+        );
+        return;
+      }
+
+      // Uma chamada sem autorização nunca deve continuar
+      // tentando clicar no botão.
+      if (result.blocked) {
+        clearTimeout(this.endLiveEmergencyTimer);
+        this.endLiveEmergencyTimer = null;
+        this.endTimerBusy = false;
+        return;
+      }
+
+      if (attempts >= maxAttempts) {
+        await this.finishEndTimerFailure(
+          reason,
+          result
+        );
+        return;
+      }
+
+      this.endLiveEmergencyTimer = setTimeout(
+        () => attemptEnd().catch(console.error),
+        500
+      );
+    };
+
+    attemptEnd().catch(console.error);
   },
 
   async finishEndTimerSuccess(reason, result) {
@@ -255,8 +377,56 @@ const OrionContentAutomation = {
     this.endTimerBusy = false;
   },
 
-  async handleEndTimer() {
-    // Encerramento gerenciado exclusivamente por liveflow-core.js
+  async handleEndTimer({
+    force = false,
+    reason = "timer-zero"
+  } = {}) {
+    const endTimerAt = Number(
+      this.settings.endTimerAt || 0
+    );
+
+    const now = Date.now();
+
+    // Nunca encerra ao iniciar a LIVE.
+    // Para timer-zero, exige um timer válido e realmente vencido.
+    if (reason === "timer-zero") {
+      if (!endTimerAt) return;
+      if (this.settings.endTimerPaused) return;
+      if (!force && now < endTimerAt) return;
+    }
+
+    // Aviso crítico pode forçar encerramento sem depender do timer.
+    if (
+      reason !== "timer-zero" &&
+      reason !== "warning" &&
+      !force
+    ) {
+      return;
+    }
+
+    if (this.endTimerBusy) return;
+
+    if (
+      reason === "timer-zero" &&
+      this.completedEndTimerAt === endTimerAt
+    ) {
+      return;
+    }
+
+    this.endTimerBusy = true;
+
+    if (reason === "timer-zero") {
+      this.completedEndTimerAt = endTimerAt;
+    }
+
+    clearTimeout(this.commentTimer);
+    clearInterval(this.autoPinTimer);
+
+    this.commentTimer = null;
+    this.autoPinTimer = null;
+    this.autoPinBusy = false;
+
+    this.startEmergencyEndLoop(reason);
   },
 
   async handleLiveTransition() {

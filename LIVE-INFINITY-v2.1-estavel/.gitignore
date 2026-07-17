@@ -1,6 +1,0 @@
-node_modules/
-.env
-*.log
-.DS_Store
-license-server/data/*.tmp
-license-server/backups/
